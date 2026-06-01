@@ -18,6 +18,9 @@ from argparse import ArgumentTypeError as ArgTypeErr
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import networkx as nx
+from networkx.algorithms.dominance import immediate_dominators
+
 
 STEP = 0
 STATE_FN = "state-fast"
@@ -64,7 +67,6 @@ def remove_repeated_lines(in_path, out_path):
 
 
 def merge_callgraphs(dots, outfilepath):
-    import networkx as nx
     print(f"({STEP}) Integrating several call-graphs into one.")
     G = nx.DiGraph()
     for dot in dots:
@@ -101,11 +103,10 @@ def construct_callgraph(args, binaries):
         opt_callgraph(args, binary)
         temp = dot_files / f"{binary.name}.callgraph.temp.dot"
         callgraph = dot_files / f"{binary.name}.callgraph.dot"
-        callgraph.replace(temp)     # return only works with py >= 3.8 :(
+        callgraph.replace(temp)
         remove_repeated_lines(temp, callgraph)
         temp.unlink()
 
-    # The goal is to have one file called "callgraph.dot"
     if fuzzer:
         cg = dot_files / f"{binary.name}.callgraph.dot"
         cg.replace(callgraph_out)
@@ -117,17 +118,6 @@ def construct_callgraph(args, binaries):
 
 def exec_distance_prog(dot, targets, out, names, cg_distance=None,
                        cg_callsites=None, py_version=False):
-    """
-    Args:
-        dot: Path to dot-file representing the graph.
-        targets: Path to file specifying Target nodes.
-        out: Path to output file containing distance for each node.
-        names: Path to file containing name for each node.
-        cg_distance: Path to file containing call-graph distance.
-        cg_callsites: Path to file containing mapping between basic blocks and
-            called functions.
-        py_version: If true, the python version is used.
-    """
     prog = DIST_BIN if not py_version else DIST_PY
     cmd = [prog,
            "-d", dot,
@@ -147,7 +137,6 @@ def dd_cleanup(cfg):
     awk '!a[$0]++' {cfg} > {cfg}.smaller.dot;
     mv {cfg}.smaller.dot {cfg};
     sed -i s/\\\\\"//g {cfg};
-    sed -i 's/\[.\"]//g' {cfg};
     sed -i 's/\(^\s*[0-9a-zA-Z_]*\):[a-zA-Z0-9]*\( -> \)/\1\2/g' {cfg}
     """
     subprocess.run(cmd, shell=True)
@@ -160,7 +149,6 @@ def merge_distance_files(cfg_cg_path, output):
                 f.write(df.read())
 
 
-# загрузка сложностей из файла
 def load_block_complexities(bbnames_path):
     """Return dict {bb_name: complexity} where complexity is an integer >= 0."""
     complexities = {}
@@ -183,15 +171,47 @@ def load_block_complexities(bbnames_path):
     return complexities
 
 
-# добавление сложности в граф
-def apply_complexity_weights(dot_path, complexities, penalty_factor=5.0):
-    """
-    For every edge where the destination node is in complexities,
-    add (or replace) a weight attribute = 1.0 + penalty_factor * complexity.
-    Returns the modified content as a string.
-    """
+def compute_dominator_factor(dot_path, target_nodes):
+    try:
+        G = nx.DiGraph(nx.drawing.nx_pydot.read_dot(dot_path))
+    except Exception:
+        return {}
+    
+    entry = None
+    for node in G.nodes():
+        if G.in_degree(node) == 0:
+            entry = node
+            break
+    if entry is None:
+        entry = next(iter(G.nodes())) if G.nodes() else None
+    if entry is None:
+        return {}
+
+    try:
+        idoms = immediate_dominators(G, entry)
+    except Exception:
+        return {}
+
+    dominator_set = set()
+    for target in target_nodes:
+        if target not in G:
+            continue
+        current = target
+        while current in idoms and current != entry:
+            dominator_set.add(current)
+            current = idoms[current]
+        if current == entry:
+            dominator_set.add(entry)
+
+    return {node: (0.2 if node in dominator_set else 1.0) for node in G.nodes()}
+
+
+def apply_complexity_weights(dot_path, complexities, target_nodes, penalty_factor=5.0):
     if not dot_path.exists() or not complexities:
         return None
+
+    dom_factors = compute_dominator_factor(dot_path, target_nodes)
+
     with dot_path.open("r") as f:
         content = f.read()
     
@@ -204,8 +224,9 @@ def apply_complexity_weights(dot_path, complexities, penalty_factor=5.0):
             dst = m.group(2)
             rest = m.group(3).rstrip(';').strip()
             if dst in complexities:
-                weight = 1.0 + penalty_factor * complexities[dst]
-                # replace or add weight attribute
+                base_weight = 1.0 + penalty_factor * complexities[dst]
+                factor = dom_factors.get(dst, 1.0)
+                weight = base_weight * factor
                 if 'weight=' in rest:
                     rest = re.sub(r'weight=\d+(\.\d+)?', f'weight={weight}', rest)
                 else:
@@ -225,14 +246,20 @@ def calculating_distances(args):
     callgraph = dot_files / CALLGRAPH_NAME
     callgraph_distance = args.temporary_directory / "callgraph.distance.txt"
 
-    # Load complexities
     complexities = load_block_complexities(bbnames)
     if complexities:
         print(f"({STEP}) Loaded complexities for {len(complexities)} blocks.")
-        # When complexities exist, we must use Python distance calculator for CFG
         use_python_for_cfg = True
     else:
         use_python_for_cfg = args.python_only
+
+    target_nodes = set()
+    if bbtargets.exists():
+        with bbtargets.open("r") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    target_nodes.add(line)
 
     if STEP == 1:
         print(f"({STEP}) Computing distance for callgraph")
@@ -243,7 +270,7 @@ def calculating_distances(args):
                     ftargets,
                     callgraph_distance,
                     fnames,
-                    py_version=args.python_only)  # callgraph can stay C++ if desired
+                    py_version=args.python_only)
         except subprocess.CalledProcessError as err:
             with log_p.open("w") as f:
                 f.write(err.stderr.decode())
@@ -258,17 +285,30 @@ def calculating_distances(args):
     with callgraph.open("r") as f:
         callgraph_dot = f.read()
 
-    # Helper
+    def resolve_target_nodes(dot_path, target_lines):
+        resolved = set()
+        try:
+            G = nx.DiGraph(nx.drawing.nx_pydot.read_dot(dot_path))
+        except Exception:
+            return resolved
+        for node in G.nodes():
+            for tline in target_lines:
+                if node.startswith(tline + ':'):
+                    resolved.add(node)
+                    break
+        return resolved
+
     def calculate_cfg_distance_from_file(cfg: Path):
         if cfg.stat().st_size == 0: return
-        # Apply complexity weights if needed
+
         if complexities:
-            new_dot = apply_complexity_weights(cfg, complexities)
+            relevant_targets = resolve_target_nodes(cfg, target_nodes)
+            new_dot = apply_complexity_weights(cfg, complexities, relevant_targets)
             if new_dot is not None:
                 with cfg.open("w") as f:
                     f.write(new_dot)
 
-        dd_cleanup(cfg)     # for python version
+        dd_cleanup(cfg)
         name = cfg.name.split('.')[-2]
         if name not in callgraph_dot: return
         outname = name + ".distances.txt"
@@ -281,6 +321,7 @@ def calculating_distances(args):
                 callgraph_distance,
                 bbcalls,
                 py_version=use_python_for_cfg)
+
     print(f"({STEP}) Computing distance for control-flow graphs (this might "
           "take a while)")
     with ThreadPoolExecutor(max_workers=mp.cpu_count()) as executor:
@@ -288,7 +329,8 @@ def calculating_distances(args):
                                dot_files.glob("cfg.*.dot"))
 
     try:
-        for r in results: pass  # forward Exceptions
+        for r in results:
+            pass
     except subprocess.CalledProcessError as err:
         log_p = args.temporary_directory / f"step{STEP}.log"
         with log_p.open("w") as f:
@@ -320,14 +362,12 @@ CXXFLAGS=\"$CXXFLAGS -distance=$(readlink -e $TMPDIR/distance.cfg.txt)\"
 
 # -- Argparse --
 def is_path_to_dir(path):
-    """Returns Path object when path is an existing directory"""
     p = Path(path)
     if not p.exists():
         raise ArgTypeErr("path doesn't exist")
     if not p.is_dir():
         raise ArgTypeErr("not a directory")
     return p
-# ----
 
 
 def main():
@@ -350,7 +390,6 @@ def main():
                         help="Use the python version for distance calculation")
     args = parser.parse_args()
 
-    # Additional sanity checks
     binaries = list(args.binaries_directory.glob("*.0.0.*.bc"))
     if len(binaries) == 0:
         parser.error("Couldn't find any binaries in folder "

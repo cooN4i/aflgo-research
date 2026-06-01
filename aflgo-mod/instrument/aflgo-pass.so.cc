@@ -105,10 +105,6 @@ namespace {
 
       bool runOnModule(Module &M) override;
 
-      // StringRef getPassName() const override {
-      //  return "American Fuzzy Lop Instrumentation";
-      // }
-
   };
 
 }
@@ -166,6 +162,43 @@ static bool isBlacklisted(const Function *F) {
   }
 
   return false;
+}
+
+static unsigned getCmpWeight(const CmpInst *CI) {
+    unsigned weight = 1;
+
+    Value *op0 = CI->getOperand(0);
+    Value *op1 = CI->getOperand(1);
+
+    auto isConstantInt = [](Value *v) -> bool {
+        return isa<ConstantInt>(v);
+    };
+
+    auto isStringConstant = [](Value *v) -> bool {
+        if (auto *gv = dyn_cast<GlobalVariable>(v)) {
+            if (gv->hasInitializer() && isa<ConstantDataArray>(gv->getInitializer())) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    unsigned predicate = CI->getPredicate();
+    bool hasConstantInt = isConstantInt(op0) || isConstantInt(op1);
+    bool hasString = isStringConstant(op0) || isStringConstant(op1);
+    bool isEquality = (predicate == CmpInst::ICMP_EQ || predicate == CmpInst::ICMP_NE);
+
+    if (hasString && isEquality) {
+        weight = 200;
+    } else if (hasConstantInt && isEquality) {
+        weight = 100;
+    } else if (hasConstantInt) {
+        weight = 1;
+    } else {
+        weight = 5;
+    }
+
+    return weight;
 }
 
 bool AFLCoverage::runOnModule(Module &M) {
@@ -360,15 +393,13 @@ bool AFLCoverage::runOnModule(Module &M) {
             BB.setValueName(ValueName::Create(NameRef, Allocator));
           }
 
-          // вычисление сложности базового блока 
           unsigned complexity = 0;
           for (auto &I : BB) {
-            if (isa<CmpInst>(&I)) {
-              complexity++;
+            if (auto *CI = dyn_cast<CmpInst>(&I)) {
+              complexity += getCmpWeight(CI);
             }
           }
 
-          // запись в BBnames.txt с добавлением сложности
           bbnames << BB.getName().str() << "," << complexity << "\n";
           has_BBs = true;
 
