@@ -1,0 +1,1 @@
+/mnt/d/НИР/aflgo-orig/instrument/llvm_tools/build/bin/clang++ -Wall -Wextra -O2 -march=native CMakeFiles/distance.bin.dir/distance.bin.cc.o -o distance.bin  /usr/lib/x86_64-linux-gnu/libboost_program_options.so.1.74.0 /usr/lib/x86_64-linux-gnu/libboost_graph.so.1.74.0 /usr/lib/x86_64-linux-gnu/libboost_regex.so.1.74.0 
