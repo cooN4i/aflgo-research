@@ -1,0 +1,18 @@
+# сборки LLVM
+**/llvm_tools/build/
+**/llvm_tools/llvm/
+**/llvm_tools/clang/
+**/llvm_tools/compiler-rt/
+
+# результаты
+*-runs/
+aflgo-comparison/
+
+# примеры сборки
+**/examples/libxml2_ef709ce2/
+
+# объектные файлы и библиотеки
+*.o
+*.so
+*.bc
+*.a
