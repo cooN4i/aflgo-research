@@ -192,6 +192,8 @@ static unsigned getCmpWeight(const CmpInst *CI) {
         weight = 200;
     } else if (hasConstantInt && isEquality) {
         weight = 100;
+    } else if (isEquality) {
+        weight = 100;
     } else if (hasConstantInt) {
         weight = 1;
     } else {

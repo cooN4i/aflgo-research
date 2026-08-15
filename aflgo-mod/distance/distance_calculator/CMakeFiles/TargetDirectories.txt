@@ -1,3 +1,0 @@
-/mnt/d/НИР/aflgo-mod/distance/distance_calculator/CMakeFiles/distance.bin.dir
-/mnt/d/НИР/aflgo-mod/distance/distance_calculator/CMakeFiles/edit_cache.dir
-/mnt/d/НИР/aflgo-mod/distance/distance_calculator/CMakeFiles/rebuild_cache.dir

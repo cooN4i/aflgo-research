@@ -28,7 +28,7 @@ DOT_DIR_NAME = "dot-files"
 CALLGRAPH_NAME = "callgraph.dot"
 PROJ_ROOT = Path(__file__).resolve().parent.parent
 DIST_BIN = PROJ_ROOT / "distance/distance_calculator/distance.bin"
-DIST_PY  = PROJ_ROOT / "distance/distance_calculator/distance.py"
+DIST_PY = PROJ_ROOT / "distance/distance_calculator/distance.py"
 
 
 def next_step(args):
@@ -176,7 +176,7 @@ def compute_dominator_factor(dot_path, target_nodes):
         G = nx.DiGraph(nx.drawing.nx_pydot.read_dot(dot_path))
     except Exception:
         return {}
-    
+
     entry = None
     for node in G.nodes():
         if G.in_degree(node) == 0:
@@ -187,23 +187,46 @@ def compute_dominator_factor(dot_path, target_nodes):
     if entry is None:
         return {}
 
+    # 1. вычисляем строгие доминаторы (скидка 80% к стоимости)
     try:
         idoms = immediate_dominators(G, entry)
     except Exception:
-        return {}
+        idoms = {}
 
     dominator_set = set()
-    for target in target_nodes:
-        if target not in G:
-            continue
-        current = target
-        while current in idoms and current != entry:
-            dominator_set.add(current)
-            current = idoms[current]
-        if current == entry:
-            dominator_set.add(entry)
+    if idoms:
+        for target in target_nodes:
+            if target not in G:
+                continue
+            current = target
+            while current in idoms and current != entry:
+                dominator_set.add(current)
+                current = idoms[current]
+            if current == entry:
+                dominator_set.add(entry)
 
-    return {node: (0.2 if node in dominator_set else 1.0) for node in G.nodes()}
+    # 2. вычисляем идеальный маршрут (скидка 50%)
+    shortest_path_set = set()
+    for target in target_nodes:
+        if target in G:
+            try:
+                # ищем кратчайший путь (по количеству блоков) от входа к цели
+                path = nx.dijkstra_path(G, source=entry, target=target)
+                shortest_path_set.update(path)
+            except nx.NetworkXNoPath:
+                continue
+
+    # 3. раздаем коэффициенты
+    factors = {}
+    for node in G.nodes():
+        if node in dominator_set:
+            factors[node] = 0.2  # обязательный чекпоинт (доминатор)
+        elif node in shortest_path_set:
+            factors[node] = 0.5  # мягкий чекпоинт (подсказка)
+        else:
+            factors[node] = 1.0  # обычная дорога
+
+    return factors
 
 
 def apply_complexity_weights(dot_path, complexities, target_nodes, penalty_factor=5.0):
@@ -214,7 +237,7 @@ def apply_complexity_weights(dot_path, complexities, target_nodes, penalty_facto
 
     with dot_path.open("r") as f:
         content = f.read()
-    
+
     lines = content.split('\n')
     new_lines = []
     for line in lines:
@@ -228,7 +251,8 @@ def apply_complexity_weights(dot_path, complexities, target_nodes, penalty_facto
                 factor = dom_factors.get(dst, 1.0)
                 weight = base_weight * factor
                 if 'weight=' in rest:
-                    rest = re.sub(r'weight=\d+(\.\d+)?', f'weight={weight}', rest)
+                    rest = re.sub(r'weight=\d+(\.\d+)?',
+                                  f'weight={weight}', rest)
                 else:
                     rest = f'{rest}, weight={weight}' if rest else f'weight={weight}'
                 line = f'"{src}" -> "{dst}" [{rest}];'
@@ -266,11 +290,11 @@ def calculating_distances(args):
         log_p = args.temporary_directory / f"step{STEP}.log"
         try:
             r = exec_distance_prog(
-                    callgraph,
-                    ftargets,
-                    callgraph_distance,
-                    fnames,
-                    py_version=args.python_only)
+                callgraph,
+                ftargets,
+                callgraph_distance,
+                fnames,
+                py_version=args.python_only)
         except subprocess.CalledProcessError as err:
             with log_p.open("w") as f:
                 f.write(err.stderr.decode())
@@ -299,28 +323,31 @@ def calculating_distances(args):
         return resolved
 
     def calculate_cfg_distance_from_file(cfg: Path):
-        if cfg.stat().st_size == 0: return
+        if cfg.stat().st_size == 0:
+            return
 
         if complexities:
             relevant_targets = resolve_target_nodes(cfg, target_nodes)
-            new_dot = apply_complexity_weights(cfg, complexities, relevant_targets)
+            new_dot = apply_complexity_weights(
+                cfg, complexities, relevant_targets)
             if new_dot is not None:
                 with cfg.open("w") as f:
                     f.write(new_dot)
 
         dd_cleanup(cfg)
         name = cfg.name.split('.')[-2]
-        if name not in callgraph_dot: return
+        if name not in callgraph_dot:
+            return
         outname = name + ".distances.txt"
         outpath = cfg.parent / outname
         exec_distance_prog(
-                cfg,
-                bbtargets,
-                outpath,
-                bbnames,
-                callgraph_distance,
-                bbcalls,
-                py_version=use_python_for_cfg)
+            cfg,
+            bbtargets,
+            outpath,
+            bbnames,
+            callgraph_distance,
+            bbcalls,
+            py_version=use_python_for_cfg)
 
     print(f"({STEP}) Computing distance for control-flow graphs (this might "
           "take a while)")
@@ -339,8 +366,8 @@ def calculating_distances(args):
 
     print(f"({STEP}) Done computing distance for CFG")
     merge_distance_files(
-            dot_files,
-            args.temporary_directory / "distance.cfg.txt")
+        dot_files,
+        args.temporary_directory / "distance.cfg.txt")
     next_step(args)
 
 
@@ -384,7 +411,7 @@ def main():
     parser.add_argument("fuzzer_name", metavar="fuzzer-name",
                         nargs='?',
                         help="Name of fuzzer binary")
-    parser.add_argument("-p" ,"--python-only",
+    parser.add_argument("-p", "--python-only",
                         action="store_true",
                         default=False,
                         help="Use the python version for distance calculation")

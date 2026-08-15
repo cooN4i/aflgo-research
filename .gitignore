@@ -16,3 +16,10 @@ aflgo-comparison/
 *.so
 *.bc
 *.a
+/stats
+*.log
+/docker-aflgo
+plot_maker.py
+/venv
+fuzzbench.zip
+fuzzbench/
