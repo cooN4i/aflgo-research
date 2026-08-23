@@ -170,34 +170,59 @@ static unsigned getCmpWeight(const CmpInst *CI) {
     Value *op0 = CI->getOperand(0);
     Value *op1 = CI->getOperand(1);
 
-    auto isConstantInt = [](Value *v) -> bool {
-        return isa<ConstantInt>(v);
-    };
-
-    auto isStringConstant = [](Value *v) -> bool {
+    // достаем реальную длину строки
+    auto getStringLength = [](Value *v) -> unsigned {
         if (auto *gv = dyn_cast<GlobalVariable>(v)) {
-            if (gv->hasInitializer() && isa<ConstantDataArray>(gv->getInitializer())) {
-                return true;
+            if (gv->hasInitializer()) {
+                if (auto *cda = dyn_cast<ConstantDataArray>(gv->getInitializer())) {
+                    if (cda->isString()) {
+                        return cda->getAsString().size();
+                    }
+                    // если это просто массив байт (char array), но не C-строка
+                    if (cda->getElementType()->isIntegerTy(8)) {
+                        return cda->getNumElements();
+                    }
+                }
             }
         }
-        return false;
+        return 0;
     };
 
     unsigned predicate = CI->getPredicate();
-    bool hasConstantInt = isConstantInt(op0) || isConstantInt(op1);
-    bool hasString = isStringConstant(op0) || isStringConstant(op1);
     bool isEquality = (predicate == CmpInst::ICMP_EQ || predicate == CmpInst::ICMP_NE);
 
-    if (hasString && isEquality) {
-        weight = 200;
-    } else if (hasConstantInt && isEquality) {
-        weight = 100;
-    } else if (isEquality) {
-        weight = 100;
-    } else if (hasConstantInt) {
-        weight = 1;
+    if (isEquality) {
+        unsigned strLen0 = getStringLength(op0);
+        unsigned strLen1 = getStringLength(op1);
+        unsigned maxStrLen = std::max(strLen0, strLen1);
+
+        if (maxStrLen > 0) {
+            // каждый символ = 1 байт = 8 бит информации
+            weight = maxStrLen * 8;
+        } else {
+            // берем реальную ширину типа в битах прямо из LLVM
+            Type *opType = op0->getType();
+            
+            if (opType->isIntegerTy()) {
+                weight = opType->getIntegerBitWidth();
+            } else if (opType->isPointerTy()) {
+                weight = 64; // указатели на 64-битных системах требуют совпадения 64 бит
+            } else if (opType->isFloatTy()) {
+                weight = 32;
+            } else if (opType->isDoubleTy()) {
+                weight = 64;
+            } else {
+                weight = 32; // значение на случай не перечисленных типов
+            }
+        }
+        
+        // гарантируем, что вес не будет нулевым
+        if (weight == 0) weight = 1;
+        
     } else {
-        weight = 5;
+        // для неравенств (>, <, >=, <=) фаззеру достаточно угадать одно направление
+        // вероятность успеха 50%, энтропия = 1 бит.
+        weight = 1;
     }
 
     return weight;
