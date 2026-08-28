@@ -218,7 +218,7 @@ static unsigned getCmpWeight(const CmpInst *CI) {
         
         // гарантируем, что вес не будет нулевым
         if (weight == 0) weight = 1;
-        weight = weight * 10;
+        weight = weight * 5;
         
     } else {
         // для неравенств (>, <, >=, <=) фаззеру достаточно угадать одно направление
