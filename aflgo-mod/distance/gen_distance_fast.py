@@ -10,6 +10,7 @@ MODIFIED: Complexity-based edge weighting.
 - Uses Python distance calculator for CFG to respect edge weights.
 """
 import argparse
+import math
 import multiprocessing as mp
 import sys
 import subprocess
@@ -247,7 +248,7 @@ def apply_complexity_weights(dot_path, complexities, target_nodes, penalty_facto
             dst = m.group(2)
             rest = m.group(3).rstrip(';').strip()
             if dst in complexities:
-                base_weight = 1.0 + penalty_factor * complexities[dst]
+                base_weight = min(1.0 + 0.2 * math.sqrt(complexities[dst]), 5.0)
                 factor = dom_factors.get(dst, 1.0)
                 weight = base_weight * factor
                 if 'weight=' in rest:
