@@ -1,0 +1,6 @@
+storage/cache/
+storage/binaries/
+storage/runs/
+storage/plots/
+__pycache__/
+*.pyc

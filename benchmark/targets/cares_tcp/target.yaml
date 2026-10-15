@@ -1,0 +1,21 @@
+target:
+  id: "cares_tcp"
+  name: "c-ares DNS Library (ares_getaddrinfo UAF)"
+  repo_url: "https://github.com/c-ares/c-ares.git"
+  commit: "c93e50f3ebc0373fe57677523ec960f6c1cb0e15"
+  vulnerability:
+    type: "Use-After-Free (UAF)"
+    reference: "bikini/exploitarium/c-ares-tcp-uaf-calc-poc"
+    target_file: "src/lib/ares_process.c"
+    target_line: "ares_process.c:480"
+
+build:
+  configure_cmd: "cmake -B build -DCARES_STATIC=ON -DCARES_SHARED=OFF -DCARES_BUILD_TESTS=OFF -DCARES_BUILD_TOOLS=OFF"
+  make_cmd: "cmake --build build -j$(nproc)"
+  binary_path: "cares_fuzz_harness"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "@@"
+  input_type: "file"
+  seed_dir: "seeds"

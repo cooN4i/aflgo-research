@@ -1,0 +1,21 @@
+target:
+  id: "libssh2_packet"
+  name: "libssh2 (packet_length Integer Wrap)"
+  repo_url: "https://github.com/libssh2/libssh2.git"
+  commit: "libssh2-1.11.0"
+  vulnerability:
+    type: "Integer Overflow / Arithmetic Wrap"
+    reference: "bikini/exploitarium/libssh2-cve-2026-55200-poc"
+    target_file: "src/transport.c"
+    target_line: "transport.c:85"
+
+build:
+  configure_cmd: "cmake -B build -DBUILD_SHARED_LIBS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF -DENABLE_ZLIB_COMPRESSION=OFF"
+  make_cmd: "cmake --build build -j$(nproc)"
+  binary_path: "libssh2_fuzz_harness"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "@@"
+  input_type: "file"
+  seed_dir: "seeds"

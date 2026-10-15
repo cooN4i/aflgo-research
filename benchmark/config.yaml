@@ -1,0 +1,116 @@
+# ==============================================================================
+# Custom Directed Fuzzing Benchmark Configuration
+# ==============================================================================
+
+benchmark:
+  name: "DGF-Exploitarium-Benchmark"
+  version: "1.0.0"
+  description: "Comparative benchmark for Directed Greybox Fuzzers on real-world vulnerabilities"
+
+# ------------------------------------------------------------------------------
+# Resource & Execution Limits
+# ------------------------------------------------------------------------------
+resources:
+  cpu_per_trial: 1           # Pin exactly 1 CPU core per fuzzer instance
+  memory_limit: "4g"         # Max RAM per container to prevent system freeze
+  max_parallel_workers: 4    # Adjust according to available host CPU cores
+
+experiment:
+  duration: "12h"            # Fuzzing campaign duration per trial (e.g. 8h, 12h, 24h)
+  trials: 5                  # Number of repetitions per (fuzzer, target) pair
+  metric_poll_interval: 60   # Status and metric polling interval (seconds)
+
+# ------------------------------------------------------------------------------
+# Approved Evaluation Metrics
+# ------------------------------------------------------------------------------
+metrics:
+  - id: "time_to_target"
+    name: "Time-To-Target (TTT / TTE)"
+    description: "Wall-clock seconds to first target reach (T_reach) and first bug trigger (T_trigger)"
+    aggregation: ["median", "iqr"]
+
+  - id: "execs_to_target"
+    name: "Executions-To-Target (ETT)"
+    description: "Number of test executions performed before triggering target bug"
+    aggregation: ["median", "iqr"]
+
+  - id: "success_rate"
+    name: "Success Rate"
+    description: "Fraction of trials that successfully triggered the bug within timeout"
+    unit: "percentage"
+
+  - id: "distance_convergence"
+    name: "Distance Convergence Rate"
+    description: "Evolution of minimum and average distance d_min(t) over time"
+
+  - id: "statistical_significance"
+    name: "Mann-Whitney U Test"
+    description: "Two-sided p-value and Vargha-Delaney A12 effect size against baseline"
+
+# ------------------------------------------------------------------------------
+# Competing Fuzzers
+# ------------------------------------------------------------------------------
+fuzzers:
+  - id: "aflgo_orig"
+    name: "AFLGo (Vanilla)"
+    path: "fuzzers/aflgo_orig"
+    type: "distance_based"
+    baseline: true
+
+  - id: "aflgo_mod"
+    name: "AFLGo (Modified: Complexity & Dominators)"
+    path: "fuzzers/aflgo_mod"
+    type: "distance_based"
+    baseline: false
+
+  - id: "dafl"
+    name: "DAFL (Selectivity & Score-based DGF)"
+    path: "fuzzers/dafl"
+    type: "selectivity_based"
+    baseline: false
+
+  - id: "fishfuzz"
+    name: "FishFuzz (Multi-distance & Dynamic Target Ranking)"
+    path: "fuzzers/fishfuzz"
+    type: "multi_distance"
+    baseline: false
+
+  - id: "windranger"
+    name: "WindRanger (Deviation Basic Blocks DGF)"
+    path: "fuzzers/windranger"
+    type: "deviation_based"
+    baseline: false
+
+# ------------------------------------------------------------------------------
+# Benchmark Targets (All from bikini/exploitarium)
+# ------------------------------------------------------------------------------
+targets:
+  - id: "objdump_dlx"
+    name: "GNU Binutils objdump (DLX ELF OOB Write)"
+    exploitarium_dir: "objdump-dlx-calc-poc"
+    path: "targets/objdump_dlx"
+    enabled: true
+
+  - id: "ffmpeg_rasc"
+    name: "FFmpeg RASC Decoder (decode_dlta OOB Write)"
+    exploitarium_dir: "ffmpeg-rasc-dlta-calc-poc"
+    path: "targets/ffmpeg_rasc"
+    enabled: true
+
+  - id: "vlc_vp9"
+    name: "FFmpeg/VLC VP9 Decoder (Slice-Thread Overwrite)"
+    exploitarium_dir: "vlc-vp9-reschange-crash-poc"
+    path: "targets/vlc_vp9"
+    enabled: true
+
+  - id: "cares_tcp"
+    name: "c-ares DNS Library (ares_getaddrinfo UAF)"
+    exploitarium_dir: "c-ares-tcp-uaf-calc-poc"
+    path: "targets/cares_tcp"
+    enabled: true
+
+  - id: "libssh2_packet"
+    name: "libssh2 (packet_length Integer Wrap)"
+    exploitarium_dir: "libssh2-cve-2026-55200-poc"
+    path: "targets/libssh2_packet"
+    enabled: true

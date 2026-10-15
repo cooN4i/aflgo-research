@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Build script for Target 1: GNU Binutils objdump (DLX ELF)
+# Supports two-pass instrumentation for AFLGo / AFLGo-mod and WindRanger
+# ==============================================================================
+set -euo pipefail
+
+MODE="${1:-all}"  # "pass1", "pass2", or "all"
+SRC_DIR="${SRC_DIR:-/src/binutils-gdb}"
+OUT_DIR="${OUT_DIR:-/out}"
+WORK_DIR="${WORK_DIR:-/work}"
+
+export CC="${CC:-afl-clang-fast}"
+export CXX="${CXX:-afl-clang-fast++}"
+
+mkdir -p "$OUT_DIR" "$WORK_DIR"
+
+cd "$SRC_DIR"
+
+# Set target lines for Directed Fuzzers
+echo "elf32-dlx.c:1340" > "$WORK_DIR/BBtargets.txt"
+
+if [ "$MODE" = "pass1" ] || [ "$MODE" = "all" ]; then
+    echo "[*] Starting Pass 1: CFG / CallGraph Extraction..."
+    
+    make clean || true
+    make distclean || true
+
+    export ADDITIONAL="-targets=$WORK_DIR/BBtargets.txt -outdir=$WORK_DIR -flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
+    export CFLAGS="${CFLAGS:-} $ADDITIONAL"
+    export CXXFLAGS="${CXXFLAGS:-} $ADDITIONAL"
+
+    ./configure --target=dlx-elf \
+                --disable-shared \
+                --disable-gdb \
+                --disable-libdecnumber \
+                --disable-readline \
+                --disable-sim \
+                --disable-nls \
+                --prefix="$WORK_DIR/install"
+
+    make -j"$(nproc)" all-binutils
+    
+    echo "[*] Pass 1 complete. Graphs generated in $WORK_DIR"
+fi
+
+if [ "$MODE" = "distance" ] || [ "$MODE" = "all" ]; then
+    if [ -n "${AFLGO:-}" ] && [ -f "$AFLGO/distance/gen_distance_fast.py" ]; then
+        echo "[*] Calculating distances using AFLGo ($AFLGO)..."
+        python3 "$AFLGO/distance/gen_distance_fast.py" "$SRC_DIR/binutils" "$WORK_DIR" objdump
+        echo "[*] Distance calculation complete: $WORK_DIR/distance.cfg.txt"
+    elif [ -n "${FF_AFL:-}" ] && [ -f "$FF_AFL/scripts/gen_initial_distance.py" ]; then
+        echo "[*] Calculating distances using FishFuzz ($FF_AFL)..."
+        python3 "$FF_AFL/scripts/gen_initial_distance.py" -t "$WORK_DIR" || true
+    elif [ -n "${WINDRANGER:-}" ]; then
+        echo "[*] Processing Deviation Basic Blocks with WindRanger ($WINDRANGER)..."
+        if [ -f "$SRC_DIR/binutils/objdump.0.0.preopt.bc" ]; then
+            cbi --targets="$WORK_DIR/BBtargets.txt" "$SRC_DIR/binutils/objdump.0.0.preopt.bc" || true
+        fi
+    fi
+fi
+
+if [ "$MODE" = "pass2" ] || [ "$MODE" = "all" ]; then
+    echo "[*] Starting Pass 2: Binary Instrumentation..."
+    
+    # Clean previous build artifacts
+    cd "$SRC_DIR"
+    make clean || true
+
+    # Check if distance file exists
+    DISTANCE_FILE="$WORK_DIR/distance.cfg.txt"
+    if [ ! -f "$DISTANCE_FILE" ]; then
+        echo "[!] Warning: $DISTANCE_FILE not found. Creating empty distance file."
+        touch "$DISTANCE_FILE"
+    fi
+
+    # Build with distance instrumentation and AddressSanitizer
+    export CFLAGS="${CFLAGS:-} -distance=$DISTANCE_FILE -fsanitize=address"
+    export CXXFLAGS="${CXXFLAGS:-} -distance=$DISTANCE_FILE -fsanitize=address"
+    export LDFLAGS="${LDFLAGS:-} -fsanitize=address"
+
+    ./configure --target=dlx-elf \
+                --disable-shared \
+                --disable-gdb \
+                --disable-libdecnumber \
+                --disable-readline \
+                --disable-sim \
+                --disable-nls \
+                --prefix="$WORK_DIR/install"
+
+    make -j"$(nproc)" all-binutils
+
+    # Copy final instrumented binary to output directory
+    cp "$SRC_DIR/binutils/objdump" "$OUT_DIR/objdump_dlx"
+    echo "[+] Successfully built instrumented binary: $OUT_DIR/objdump_dlx"
+fi

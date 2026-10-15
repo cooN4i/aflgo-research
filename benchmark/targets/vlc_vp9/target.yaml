@@ -1,0 +1,21 @@
+target:
+  id: "vlc_vp9"
+  name: "FFmpeg/VLC VP9 Decoder (Slice-Thread Heap Overwrite)"
+  repo_url: "https://github.com/FFmpeg/FFmpeg.git"
+  commit: "n4.4"  # or upstream commit where VP9 reschange crash reproduces
+  vulnerability:
+    type: "Heap Buffer Overwrite"
+    reference: "bikini/exploitarium/vlc-vp9-reschange-crash-poc"
+    target_file: "libavcodec/vp9.c"
+    target_line: "vp9.c:1340"
+
+build:
+  configure_cmd: "./configure --cc=$CC --cxx=$CXX --disable-shared --enable-static --disable-doc --disable-programs --enable-ffmpeg --disable-everything --enable-decoder=vp9 --enable-demuxer=ivf,matroska --enable-protocol=file"
+  make_cmd: "make -j$(nproc)"
+  binary_path: "ffmpeg_g"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "-y -i @@ -f null -"
+  input_type: "file"
+  seed_dir: "seeds"

@@ -1,0 +1,21 @@
+target:
+  id: "ffmpeg_rasc"
+  name: "FFmpeg RASC Decoder (decode_dlta OOB Write)"
+  repo_url: "https://github.com/FFmpeg/FFmpeg.git"
+  commit: "bcd2c69e087a09b07cf45c6bd2428ee1ccb2925c"
+  vulnerability:
+    type: "Heap Out-Of-Bounds Write"
+    reference: "bikini/exploitarium/ffmpeg-rasc-dlta-calc-poc"
+    target_file: "libavcodec/rasc.c"
+    target_line: "rasc.c:292"
+
+build:
+  configure_cmd: "./configure --cc=$CC --cxx=$CXX --disable-shared --enable-static --disable-doc --disable-programs --enable-ffmpeg --disable-everything --enable-decoder=rasc --enable-demuxer=avi --enable-protocol=file"
+  make_cmd: "make -j$(nproc)"
+  binary_path: "ffmpeg_g"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "-y -i @@ -f null -"
+  input_type: "file"
+  seed_dir: "seeds"

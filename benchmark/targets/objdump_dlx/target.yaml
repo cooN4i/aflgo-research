@@ -1,0 +1,23 @@
+target:
+  id: "objdump_dlx"
+  name: "GNU Binutils objdump (DLX ELF backend)"
+  repo_url: "https://sourceware.org/git/binutils-gdb.git"
+  commit: "c311f4d37f31ff3fbb5db6923abcdf93bb75a37b"
+  vulnerability:
+    type: "Heap Out-Of-Bounds Write / Memory Corruption"
+    reference: "bikini/exploitarium/objdump-dlx-calc-poc"
+    target_file: "bfd/elf32-dlx.c"
+    # Target basic block location in elf32-dlx.c (relocation calculation)
+    target_line: "elf32-dlx.c:1340"
+
+build:
+  configure_cmd: "./configure --target=dlx-elf --disable-shared --disable-gdb --disable-libdecnumber --disable-readline --disable-sim --disable-nls"
+  make_cmd: "make -j$(nproc) all-binutils"
+  binary_path: "binutils/objdump"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "-g @@"
+  input_type: "file"
+  seed_dir: "seeds"
+  dictionary: "elf.dict"
