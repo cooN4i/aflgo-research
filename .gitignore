@@ -27,3 +27,4 @@ fuzzbench/
 *.tar.*
 results.md
 __pycache__/
+benchmark/storage/
