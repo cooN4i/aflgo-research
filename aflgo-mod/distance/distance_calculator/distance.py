@@ -40,7 +40,8 @@ def node_name (name):
   if is_cg:
     return "\"{%s}\"" % name
   else:
-    return "\"{%s:" % name
+    base = name[:-1] if name.endswith(":") else name
+    return "\"{%s:" % base
 
 #################################
 # Find the graph node for a name
@@ -113,6 +114,15 @@ if __name__ == '__main__':
 
   print ("\nParsing %s .." % args.dot)
   G = nx.DiGraph(nx.drawing.nx_pydot.read_dot(args.dot))
+  # Ensure all edge weights are numeric floats for Dijkstra path calculations
+  for u, v, d in G.edges(data=True):
+    if 'weight' in d:
+      try:
+        d['weight'] = float(str(d['weight']).strip('\"\''))
+      except (ValueError, TypeError):
+        d['weight'] = 1.0
+    else:
+      d['weight'] = 1.0
   print (G)
 
   is_cg = "Call graph" in str(G)
@@ -185,4 +195,8 @@ if __name__ == '__main__':
   print ("Calculating distance..")
   with open(args.out, "w") as out, open(args.names, "r") as f:
     for line in f.readlines():
-      distance (line.strip())
+      line_clean = line.strip()
+      if not line_clean:
+        continue
+      name_val = line_clean.split(",")[0].strip()
+      distance (name_val)

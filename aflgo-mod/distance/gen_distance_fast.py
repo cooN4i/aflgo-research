@@ -151,25 +151,42 @@ def merge_distance_files(cfg_cg_path, output):
 
 
 def load_block_complexities(bbnames_path):
-    """Return dict {bb_name: complexity} where complexity is an integer >= 0."""
+    """Return dict {bb_name: complexity} where complexity is an integer >= 0.
+    Checks BBcomplexities.txt first, falls back to bbnames_path."""
     complexities = {}
-    if not bbnames_path.exists():
+    bbcomplexities_path = bbnames_path.parent / "BBcomplexities.txt"
+    source_path = bbcomplexities_path if bbcomplexities_path.exists() else bbnames_path
+    if not source_path.exists():
         return complexities
-    with bbnames_path.open("r") as f:
+    with source_path.open("r", encoding="utf-8", errors="ignore") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             parts = line.split(",")
             if len(parts) >= 2:
-                bb_name = parts[0]
+                bb_name = parts[0].strip()
                 try:
-                    complexity = int(parts[1])
+                    complexity = int(parts[1].strip())
                 except ValueError:
                     complexity = 0
                 if complexity > 0:
                     complexities[bb_name] = complexity
+                    # Also register without trailing colon if present
+                    if bb_name.endswith(":"):
+                        complexities[bb_name[:-1]] = complexity
     return complexities
+
+
+def parse_node_mapping(dot_content):
+    """Maps graph node identifiers (e.g. Node0x...) to basic block names (e.g. file.c:123:)."""
+    node_to_bb = {}
+    pattern = re.compile(r'^\s*"?([a-zA-Z0-9_]+)"?\s*\[.*?label="\{([^:\\]+:[^:\\]*:?)', re.MULTILINE)
+    for m in pattern.finditer(dot_content):
+        node_id = m.group(1)
+        raw_name = m.group(2).strip()
+        node_to_bb[node_id] = raw_name
+    return node_to_bb
 
 
 def compute_dominator_factor(dot_path, target_nodes):
@@ -236,27 +253,36 @@ def apply_complexity_weights(dot_path, complexities, target_nodes, penalty_facto
 
     dom_factors = compute_dominator_factor(dot_path, target_nodes)
 
-    with dot_path.open("r") as f:
+    with dot_path.open("r", encoding="utf-8", errors="ignore") as f:
         content = f.read()
+
+    node_to_bb = parse_node_mapping(content)
+    edge_pattern = re.compile(
+        r'^(\s*"?([a-zA-Z0-9_]+)"?(?::[a-zA-Z0-9_]+)?\s*->\s*"?([a-zA-Z0-9_]+)"?(?::[a-zA-Z0-9_]+)?\s*)(?:\[(.*?)\])?\s*;?\s*$'
+    )
 
     lines = content.split('\n')
     new_lines = []
     for line in lines:
-        m = re.match(r'^\s*"([^"]+)"\s*->\s*"([^"]+)"\s*(.*);$', line)
+        m = edge_pattern.match(line)
         if m:
-            src = m.group(1)
-            dst = m.group(2)
-            rest = m.group(3).rstrip(';').strip()
-            if dst in complexities:
-                base_weight = min(1.0 + 0.2 * math.sqrt(complexities[dst]), 5.0)
-                factor = dom_factors.get(dst, 1.0)
-                weight = base_weight * factor
-                if 'weight=' in rest:
-                    rest = re.sub(r'weight=\d+(\.\d+)?',
-                                  f'weight={weight}', rest)
+            prefix = m.group(1).rstrip()
+            dst_id = m.group(3)
+            attrs = m.group(4) or ""
+
+            bb_name = node_to_bb.get(dst_id, "")
+            comp = complexities.get(bb_name, complexities.get(bb_name.rstrip(':'), 0))
+
+            if comp > 0:
+                base_weight = min(1.0 + 0.2 * math.sqrt(comp), 5.0)
+                factor = dom_factors.get(dst_id, 1.0)
+                weight = round(base_weight * factor, 3)
+
+                if 'weight=' in attrs:
+                    attrs = re.sub(r'weight=\d+(\.\d+)?', f'weight={weight}', attrs)
                 else:
-                    rest = f'{rest}, weight={weight}' if rest else f'weight={weight}'
-                line = f'"{src}" -> "{dst}" [{rest}];'
+                    attrs = f'{attrs}, weight={weight}' if attrs else f'weight={weight}'
+                line = f'{prefix} [{attrs}];'
         new_lines.append(line)
     return '\n'.join(new_lines)
 
@@ -280,7 +306,7 @@ def calculating_distances(args):
 
     target_nodes = set()
     if bbtargets.exists():
-        with bbtargets.open("r") as f:
+        with bbtargets.open("r", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 line = line.strip()
                 if line:
@@ -307,19 +333,25 @@ def calculating_distances(args):
             abort(args)
         next_step(args)
 
-    with callgraph.open("r") as f:
+    with callgraph.open("r", encoding="utf-8", errors="ignore") as f:
         callgraph_dot = f.read()
 
     def resolve_target_nodes(dot_path, target_lines):
         resolved = set()
         try:
-            G = nx.DiGraph(nx.drawing.nx_pydot.read_dot(dot_path))
+            with dot_path.open("r", encoding="utf-8", errors="ignore") as df:
+                cfg_content = df.read()
+            node_to_bb = parse_node_mapping(cfg_content)
         except Exception:
             return resolved
-        for node in G.nodes():
+
+        for node_id, bb_name in node_to_bb.items():
             for tline in target_lines:
-                if node.startswith(tline + ':'):
-                    resolved.add(node)
+                # Matches if target line (e.g. file.c:123) is in or matches basic block name
+                t_clean = tline.rstrip(':')
+                bb_clean = bb_name.rstrip(':')
+                if t_clean == bb_clean or bb_clean.startswith(t_clean + ':') or t_clean in bb_clean:
+                    resolved.add(node_id)
                     break
         return resolved
 
@@ -332,7 +364,7 @@ def calculating_distances(args):
             new_dot = apply_complexity_weights(
                 cfg, complexities, relevant_targets)
             if new_dot is not None:
-                with cfg.open("w") as f:
+                with cfg.open("w", encoding="utf-8") as f:
                     f.write(new_dot)
 
         dd_cleanup(cfg)

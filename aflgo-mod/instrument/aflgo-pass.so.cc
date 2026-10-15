@@ -338,6 +338,7 @@ bool AFLCoverage::runOnModule(Module &M) {
   if (is_aflgo_preprocessing) {
 
     std::ofstream bbnames(OutDirectory + "/BBnames.txt", std::ofstream::out | std::ofstream::app);
+    std::ofstream bbcomplexities(OutDirectory + "/BBcomplexities.txt", std::ofstream::out | std::ofstream::app);
     std::ofstream bbcalls(OutDirectory + "/BBcalls.txt", std::ofstream::out | std::ofstream::app);
     std::ofstream fnames(OutDirectory + "/Fnames.txt", std::ofstream::out | std::ofstream::app);
     std::ofstream ftargets(OutDirectory + "/Ftargets.txt", std::ofstream::out | std::ofstream::app);
@@ -428,7 +429,8 @@ bool AFLCoverage::runOnModule(Module &M) {
             }
           }
 
-          bbnames << BB.getName().str() << "," << complexity << "\n";
+          bbnames << BB.getName().str() << "\n";
+          bbcomplexities << BB.getName().str() << "," << complexity << "\n";
           has_BBs = true;
 
 #ifdef AFLGO_TRACING
