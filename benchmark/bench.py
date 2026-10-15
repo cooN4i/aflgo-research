@@ -547,20 +547,18 @@ def cmd_analyze(args, config: Dict[str, Any]):
         print("[!] No trial results found to analyze.")
         return
 
+    import numpy as np
+
     # Generate Statistical Summary Table
     report_lines = [
         "# DGF Benchmark: Statistical Evaluation & Experimental Report",
         f"\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "\n## 1. Executive Summary & Approved Metrics Table\n",
-        "| Target | Fuzzer | Trials | Success Rate | Median TTT (s) | IQR TTT | Median ETT | Mann-Whitney $p$ | Vargha-Delaney $\\hat{A}_{12}$ |",
-        "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |"
+        "\n## 1. Executive Summary & Raw Metrics Across All Fuzzers\n",
+        "| Target | Fuzzer | Role | Trials | Success Rate | Median TTT (s) | IQR TTT | Median ETT |",
+        "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |"
     ]
 
     for target, fuzzers in data.items():
-        baseline_ttts = []
-        if "aflgo_orig" in fuzzers:
-            baseline_ttts = [t['ttt'] if t['status'] == "SUCCESS" else t['wall_time'] * 2 for t in fuzzers['aflgo_orig']]
-
         for fuzzer, trials in fuzzers.items():
             n_trials = len(trials)
             successes = [t for t in trials if t['status'] == "SUCCESS"]
@@ -569,23 +567,72 @@ def cmd_analyze(args, config: Dict[str, Any]):
             ttts = [t['ttt'] for t in successes]
             etts = [t['ett'] for t in successes if t.get('ett') is not None]
 
-            # Median and IQR
-            import numpy as np
             med_ttt = f"{np.median(ttts):.1f}" if ttts else "N/A"
             iqr_ttt = f"{np.percentile(ttts, 75) - np.percentile(ttts, 25):.1f}" if len(ttts) >= 2 else "N/A"
             med_ett = f"{int(np.median(etts)):,}" if etts else "N/A"
-
-            # Stats vs baseline
-            p_val_str = "-"
-            a12_str = "-"
-            if fuzzer != "aflgo_orig" and baseline_ttts:
-                current_ttts = [t['ttt'] if t['status'] == "SUCCESS" else t['wall_time'] * 2 for t in trials]
-                p_val, a12 = calculate_mann_whitney_and_a12(current_ttts, baseline_ttts)
-                p_val_str = f"{p_val:.4f}"
-                a12_str = f"{a12:.3f}"
+            role = "Proposed (Ours)" if fuzzer == "aflgo_mod" else ("Vanilla Baseline" if fuzzer == "aflgo_orig" else "SotA Competitor")
 
             report_lines.append(
-                f"| `{target}` | `{fuzzer}` | {n_trials} | **{success_rate:.1f}%** | {med_ttt} | {iqr_ttt} | {med_ett} | {p_val_str} | {a12_str} |"
+                f"| `{target}` | `{fuzzer}` | {role} | {n_trials} | **{success_rate:.1f}%** | {med_ttt} | {iqr_ttt} | {med_ett} |"
+            )
+
+    report_lines.append("\n## 2. Comparative Evaluation: Proposed `aflgo_mod` vs. All Competitors\n")
+    report_lines.append(
+        "| Target | Compared Baseline | Baseline Role | Speedup Factor | Mann-Whitney $p$ | Vargha-Delaney $\\hat{A}_{12}$ | Statistical Significance |"
+    )
+    report_lines.append(
+        "| :--- | :--- | :--- | :---: | :---: | :---: | :--- |"
+    )
+
+    preferred_order = ["aflgo_orig", "dafl", "fishfuzz", "windranger"]
+
+    for target, fuzzers in data.items():
+        if "aflgo_mod" not in fuzzers:
+            report_lines.append(f"\n*Note: `aflgo_mod` trials not yet present for `{target}`.*")
+            continue
+
+        mod_trials = fuzzers["aflgo_mod"]
+        mod_ttts = [t['ttt'] if t['status'] == "SUCCESS" else t['wall_time'] * 2 for t in mod_trials]
+        mod_successes = [t for t in mod_trials if t['status'] == "SUCCESS"]
+        mod_med = np.median([t['ttt'] for t in mod_successes]) if mod_successes else None
+
+        competitors = [f for f in fuzzers.keys() if f != "aflgo_mod"]
+        competitors.sort(key=lambda x: preferred_order.index(x) if x in preferred_order else 99)
+
+        for comp in competitors:
+            comp_trials = fuzzers[comp]
+            comp_ttts = [t['ttt'] if t['status'] == "SUCCESS" else t['wall_time'] * 2 for t in comp_trials]
+            comp_successes = [t for t in comp_trials if t['status'] == "SUCCESS"]
+            comp_med = np.median([t['ttt'] for t in comp_successes]) if comp_successes else None
+
+            p_val, a12 = calculate_mann_whitney_and_a12(mod_ttts, comp_ttts)
+
+            if mod_med and comp_med and mod_med > 0:
+                speedup = f"{comp_med / mod_med:.2f}x"
+            else:
+                speedup = "N/A"
+
+            if comp == "aflgo_orig":
+                role = "Direct Ancestor (Ablation)"
+            elif comp == "dafl":
+                role = "KAIST DGF (Selective)"
+            elif comp == "fishfuzz":
+                role = "USENIX'23 DGF (Dynamic Rank)"
+            elif comp == "windranger":
+                role = "ICSE'20 DGF (Deviation BB)"
+            else:
+                role = "Competitor"
+
+            sig_verdict = "**Significant** ($p < 0.05$)" if p_val < 0.05 else "Inconclusive ($p \\ge 0.05$)"
+            if a12 > 0.5:
+                sig_verdict += " (Ours Superior)"
+            elif a12 < 0.5:
+                sig_verdict += " (Competitor Superior)"
+            else:
+                sig_verdict += " (Equivalent)"
+
+            report_lines.append(
+                f"| `{target}` | `{comp}` | {role} | **{speedup}** | {p_val:.4f} | **{a12:.3f}** | {sig_verdict} |"
             )
 
     report_content = "\n".join(report_lines)
