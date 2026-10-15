@@ -10,6 +10,11 @@ SRC_DIR="${SRC_DIR:-/src/binutils-gdb}"
 OUT_DIR="${OUT_DIR:-/out}"
 WORK_DIR="${WORK_DIR:-/work}"
 
+export PATH="/usr/lib/llvm-11/bin:${PATH}"
+if [ ! -f /usr/bin/opt ] && [ -f /usr/lib/llvm-11/bin/opt ]; then
+    ln -sf /usr/lib/llvm-11/bin/opt /usr/bin/opt 2>/dev/null || true
+fi
+
 if [ -z "${AFL_PATH:-}" ]; then
     if [ -d "/fuzzer/dafl" ]; then export AFL_PATH="/fuzzer/dafl"; fi
     if [ -d "/fuzzer/WindRanger/fuzz" ]; then export AFL_PATH="/fuzzer/WindRanger/fuzz"; fi
