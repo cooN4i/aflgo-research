@@ -225,7 +225,7 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
         "bash", "-c",
         f"""
         set -euo pipefail
-        export PATH="/usr/lib/llvm-11/bin:${PATH}"
+        export PATH="/usr/lib/llvm-11/bin:$PATH"
         if [ ! -f /usr/bin/opt ] && [ -f /usr/lib/llvm-11/bin/opt ]; then
             ln -sf /usr/lib/llvm-11/bin/opt /usr/bin/opt 2>/dev/null || true
         fi
@@ -325,7 +325,7 @@ def run_single_trial(fuzzer: Dict[str, Any], target: Dict[str, Any], trial_idx: 
     target_args = target_info['fuzzing'].get('target_args', '@@')
 
     # Find compiled binary
-    candidates = list(bin_dir.glob(f"{target_id}*"))
+    candidates = [c for c in bin_dir.glob(f"{target_id}*") if c.is_file()]
     if not candidates:
         return {"error": f"Binary not found in {bin_dir}"}
     target_bin = str(candidates[0])
