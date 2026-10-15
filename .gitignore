@@ -28,3 +28,4 @@ fuzzbench/
 results.md
 __pycache__/
 benchmark/storage/
+test_benchmark/

@@ -10,6 +10,14 @@ SRC_DIR="${SRC_DIR:-/src/binutils-gdb}"
 OUT_DIR="${OUT_DIR:-/out}"
 WORK_DIR="${WORK_DIR:-/work}"
 
+if [ -z "${AFL_PATH:-}" ]; then
+    if [ -d "/fuzzer/dafl" ]; then export AFL_PATH="/fuzzer/dafl"; fi
+    if [ -d "/fuzzer/WindRanger/fuzz" ]; then export AFL_PATH="/fuzzer/WindRanger/fuzz"; fi
+    if [ -d "/fuzzer/fishfuzz/FF_AFL" ]; then export AFL_PATH="/fuzzer/fishfuzz/FF_AFL"; fi
+    if [ -d "/fuzzer/aflgo-mod/instrument" ]; then export AFL_PATH="/fuzzer/aflgo-mod/instrument"; fi
+    if [ -d "/fuzzer/aflgo-orig/instrument" ]; then export AFL_PATH="/fuzzer/aflgo-orig/instrument"; fi
+fi
+
 export CC="${CC:-afl-clang-fast}"
 export CXX="${CXX:-afl-clang-fast++}"
 

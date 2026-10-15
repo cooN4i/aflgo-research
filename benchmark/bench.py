@@ -225,10 +225,17 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
         "bash", "-c",
         f"""
         set -euo pipefail
-        mkdir -p /src/{target_id} /work
+        if [ -d "/fuzzer/dafl" ]; then export AFL_PATH="/fuzzer/dafl"; fi
+        if [ -d "/fuzzer/WindRanger/fuzz" ]; then export AFL_PATH="/fuzzer/WindRanger/fuzz"; fi
+        if [ -d "/fuzzer/fishfuzz/FF_AFL" ]; then export AFL_PATH="/fuzzer/fishfuzz/FF_AFL"; fi
+        if [ -d "/fuzzer/aflgo-mod/instrument" ]; then export AFL_PATH="/fuzzer/aflgo-mod/instrument"; fi
+        if [ -d "/fuzzer/aflgo-orig/instrument" ]; then export AFL_PATH="/fuzzer/aflgo-orig/instrument"; fi
+        mkdir -p /src/{target_id} /work /tmp/recipe
+        tr -d '\r' < /recipe/build.sh > /tmp/recipe/build.sh
+        chmod +x /tmp/recipe/build.sh
         cp -a /src_cache/. /src/{target_id}/
         cd /src/{target_id}
-        SRC_DIR="/src/{target_id}" WORK_DIR="/work" OUT_DIR="/out" /recipe/build.sh all
+        SRC_DIR="/src/{target_id}" WORK_DIR="/work" OUT_DIR="/out" /tmp/recipe/build.sh all
         """
     ]
 
@@ -264,7 +271,7 @@ def cmd_build(args, config: Dict[str, Any]):
     targets_to_build = []
     if args.target:
         targets_to_build = [t for t in config['targets'] if t['id'] == args.target]
-    elif args.all:
+    elif args.all or (not args.base and not args.fuzzer):
         targets_to_build = [t for t in config['targets'] if t.get('enabled', True)]
 
     active_fuzzers = [f for f in config['fuzzers'] if (args.fuzzer is None or f['id'] == args.fuzzer)]
