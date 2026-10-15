@@ -231,7 +231,7 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
         if [ -d "/fuzzer/aflgo-mod/instrument" ]; then export AFL_PATH="/fuzzer/aflgo-mod/instrument"; fi
         if [ -d "/fuzzer/aflgo-orig/instrument" ]; then export AFL_PATH="/fuzzer/aflgo-orig/instrument"; fi
         mkdir -p /src/{target_id} /work /tmp/recipe
-        tr -d '\r' < /recipe/build.sh > /tmp/recipe/build.sh
+        tr -d '\\r' < /recipe/build.sh > /tmp/recipe/build.sh
         chmod +x /tmp/recipe/build.sh
         cp -a /src_cache/. /src/{target_id}/
         cd /src/{target_id}

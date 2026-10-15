@@ -18,8 +18,8 @@ if [ -z "${AFL_PATH:-}" ]; then
     if [ -d "/fuzzer/aflgo-orig/instrument" ]; then export AFL_PATH="/fuzzer/aflgo-orig/instrument"; fi
 fi
 
-export CC="${CC:-afl-clang-fast}"
-export CXX="${CXX:-afl-clang-fast++}"
+export CC="afl-clang-fast"
+export CXX="afl-clang-fast++"
 
 mkdir -p "$OUT_DIR" "$WORK_DIR"
 
@@ -29,27 +29,35 @@ cd "$SRC_DIR"
 echo "elf32-dlx.c:1340" > "$WORK_DIR/BBtargets.txt"
 
 if [ "$MODE" = "pass1" ] || [ "$MODE" = "all" ]; then
-    echo "[*] Starting Pass 1: CFG / CallGraph Extraction..."
-    
-    make clean || true
-    make distclean || true
+    if [ -n "${DAFL:-}" ]; then
+        echo "[*] DAFL detected (single-pass selective fuzzer): skipping Pass 1 CFG extraction."
+    else
+        echo "[*] Starting Pass 1: CFG / CallGraph Extraction..."
+        make clean || true
+        make distclean || true
 
-    export ADDITIONAL="-targets=$WORK_DIR/BBtargets.txt -outdir=$WORK_DIR -flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
-    export CFLAGS="${CFLAGS:-} $ADDITIONAL"
-    export CXXFLAGS="${CXXFLAGS:-} $ADDITIONAL"
+        if [ -n "${AFLGO:-}" ]; then
+            export ADDITIONAL="-targets=$WORK_DIR/BBtargets.txt -outdir=$WORK_DIR -flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
+        elif [ -n "${WINDRANGER:-}" ] || [ -n "${FF_AFL:-}" ]; then
+            export ADDITIONAL="-flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
+        else
+            export ADDITIONAL=""
+        fi
+        export CFLAGS="${CFLAGS:-} $ADDITIONAL"
+        export CXXFLAGS="${CXXFLAGS:-} $ADDITIONAL"
 
-    ./configure --target=dlx-elf \
-                --disable-shared \
-                --disable-gdb \
-                --disable-libdecnumber \
-                --disable-readline \
-                --disable-sim \
-                --disable-nls \
-                --prefix="$WORK_DIR/install"
+        ./configure --target=dlx-elf \
+                    --disable-shared \
+                    --disable-gdb \
+                    --disable-libdecnumber \
+                    --disable-readline \
+                    --disable-sim \
+                    --disable-nls \
+                    --prefix="$WORK_DIR/install"
 
-    make -j"$(nproc)" all-binutils
-    
-    echo "[*] Pass 1 complete. Graphs generated in $WORK_DIR"
+        make -j"$(nproc)" all-binutils
+        echo "[*] Pass 1 complete. Graphs generated in $WORK_DIR"
+    fi
 fi
 
 if [ "$MODE" = "distance" ] || [ "$MODE" = "all" ]; then
@@ -64,6 +72,8 @@ if [ "$MODE" = "distance" ] || [ "$MODE" = "all" ]; then
         echo "[*] Processing Deviation Basic Blocks with WindRanger ($WINDRANGER)..."
         if [ -f "$SRC_DIR/binutils/objdump.0.0.preopt.bc" ]; then
             cbi --targets="$WORK_DIR/BBtargets.txt" "$SRC_DIR/binutils/objdump.0.0.preopt.bc" || true
+            cp distance.txt condition_info.txt targets.txt "$OUT_DIR/" 2>/dev/null || true
+            cp distance.txt condition_info.txt targets.txt "$WORK_DIR/" 2>/dev/null || true
         fi
     fi
 fi
@@ -75,17 +85,19 @@ if [ "$MODE" = "pass2" ] || [ "$MODE" = "all" ]; then
     cd "$SRC_DIR"
     make clean || true
 
-    # Check if distance file exists
-    DISTANCE_FILE="$WORK_DIR/distance.cfg.txt"
-    if [ ! -f "$DISTANCE_FILE" ]; then
-        echo "[!] Warning: $DISTANCE_FILE not found. Creating empty distance file."
-        touch "$DISTANCE_FILE"
+    if [ -n "${AFLGO:-}" ]; then
+        DISTANCE_FILE="$WORK_DIR/distance.cfg.txt"
+        if [ ! -f "$DISTANCE_FILE" ]; then
+            echo "[!] Warning: $DISTANCE_FILE not found. Creating empty distance file."
+            touch "$DISTANCE_FILE"
+        fi
+        export CFLAGS="-distance=$DISTANCE_FILE -fsanitize=address"
+        export CXXFLAGS="-distance=$DISTANCE_FILE -fsanitize=address"
+    else
+        export CFLAGS="-fsanitize=address"
+        export CXXFLAGS="-fsanitize=address"
     fi
-
-    # Build with distance instrumentation and AddressSanitizer
-    export CFLAGS="${CFLAGS:-} -distance=$DISTANCE_FILE -fsanitize=address"
-    export CXXFLAGS="${CXXFLAGS:-} -distance=$DISTANCE_FILE -fsanitize=address"
-    export LDFLAGS="${LDFLAGS:-} -fsanitize=address"
+    export LDFLAGS="-fsanitize=address"
 
     ./configure --target=dlx-elf \
                 --disable-shared \
