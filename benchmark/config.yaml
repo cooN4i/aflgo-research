@@ -12,13 +12,13 @@ benchmark:
 # ------------------------------------------------------------------------------
 resources:
   cpu_per_trial: 1           # Pin exactly 1 CPU core per fuzzer instance
-  memory_limit: "4g"         # Max RAM per container to prevent system freeze
-  max_parallel_workers: 4    # Adjust according to available host CPU cores
+  memory_limit: "2g"         # Max RAM per container to prevent system freeze
+  max_parallel_workers: 5    # Adjust according to available host CPU cores
 
 experiment:
-  duration: "12h"            # Fuzzing campaign duration per trial (e.g. 8h, 12h, 24h)
-  trials: 5                  # Number of repetitions per (fuzzer, target) pair
-  metric_poll_interval: 60   # Status and metric polling interval (seconds)
+  duration: "1h"            # Fuzzing campaign duration per trial (e.g. 8h, 12h, 24h)
+  trials: 1                  # Number of repetitions per (fuzzer, target) pair
+  metric_poll_interval: 30   # Status and metric polling interval (seconds)
 
 # ------------------------------------------------------------------------------
 # Approved Evaluation Metrics

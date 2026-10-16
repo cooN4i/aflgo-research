@@ -8,7 +8,7 @@ target:
     reference: "bikini/exploitarium/objdump-dlx-calc-poc"
     target_file: "bfd/elf32-dlx.c"
     # Target basic block location in elf32-dlx.c (relocation calculation)
-    target_line: "elf32-dlx.c:1340"
+    target_line: "elf32-dlx.c:551"
 
 build:
   configure_cmd: "./configure --target=dlx-elf --disable-shared --disable-gdb --disable-libdecnumber --disable-readline --disable-sim --disable-nls"

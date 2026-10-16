@@ -54,6 +54,14 @@ def parse_duration(duration_str: str) -> int:
     return int(duration_str)
 
 
+def safe_mkdir(path: Path):
+    """Safely creates directories, ignoring transient NTFS/DrvFS EEXIST errors."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        pass
+
+
 # ==============================================================================
 # Command: info
 # ==============================================================================
@@ -164,7 +172,7 @@ def clone_target_source(target: Dict[str, Any], cache_dir: Path):
         return target_cache
 
     print(f"[*] Cloning source for {target_id} at commit {target.get('commit', 'HEAD')}...")
-    target_cache.mkdir(parents=True, exist_ok=True)
+    safe_mkdir(target_cache)
 
     # Use shallow fetch of exact commit for fast download
     repo_url = target['repo_url']
@@ -196,10 +204,10 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
         target_info = yaml.safe_load(f)['target']
 
     out_dir = (BINARIES_DIR / fuzzer_id / target_id).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
+    safe_mkdir(out_dir)
 
     # Clone source to cache if not present
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    safe_mkdir(CACHE_DIR)
     source_cache = clone_target_source(target_info, CACHE_DIR)
 
     # Copy seeds and dictionary into out_dir for trial use
@@ -218,6 +226,7 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
     docker_cmd = [
         "docker", "run", "--rm",
         "--name", container_name,
+        "-e", "ASAN_OPTIONS=abort_on_error=1:detect_leaks=0:use_sigaltstack=0",
         "-v", f"{str(recipe_dir).replace(os.sep, '/')}:/recipe:ro",
         "-v", f"{str(source_cache).replace(os.sep, '/')}:/src_cache:ro",
         "-v", f"{str(out_dir).replace(os.sep, '/')}:/out",
@@ -225,10 +234,13 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
         "bash", "-c",
         f"""
         set -euo pipefail
+        trap 'for l in /work/*.log; do if [ -f "$l" ]; then echo "=== LOG: $l ==="; cat "$l"; fi; done' ERR
+        export ASAN_OPTIONS="abort_on_error=1:detect_leaks=0:use_sigaltstack=0"
         export PATH="/usr/lib/llvm-11/bin:$PATH"
         if [ ! -f /usr/bin/opt ] && [ -f /usr/lib/llvm-11/bin/opt ]; then
             ln -sf /usr/lib/llvm-11/bin/opt /usr/bin/opt 2>/dev/null || true
         fi
+        chmod -R +x /fuzzer 2>/dev/null || true
         if [ -d "/fuzzer/dafl" ]; then export AFL_PATH="/fuzzer/dafl"; fi
         if [ -d "/fuzzer/WindRanger/fuzz" ]; then export AFL_PATH="/fuzzer/WindRanger/fuzz"; fi
         if [ -d "/fuzzer/fishfuzz/FF_AFL" ]; then export AFL_PATH="/fuzzer/fishfuzz/FF_AFL"; fi
@@ -239,17 +251,23 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
         chmod +x /tmp/recipe/build.sh
         cp -a /src_cache/. /src/{target_id}/
         cd /src/{target_id}
-        SRC_DIR="/src/{target_id}" WORK_DIR="/work" OUT_DIR="/out" /tmp/recipe/build.sh all
+        ASAN_OPTIONS="abort_on_error=1:detect_leaks=0:use_sigaltstack=0" SRC_DIR="/src/{target_id}" WORK_DIR="/work" OUT_DIR="/out" /tmp/recipe/build.sh all
         """
     ]
 
     print(f"[*] Running compilation container...")
     res = subprocess.run(docker_cmd)
     if res.returncode != 0:
-        print(f"[!] Compilation failed for {target_id} with {fuzzer_id}!")
+        print(f"[!] Compilation failed for {target_id} with {fuzzer_id} (exit code {res.returncode})!")
         return False
 
-    print(f"[+] Successfully built target {target_id} with {fuzzer_id} -> {out_dir}")
+    # Verify that the expected instrumented binary was produced and is non-empty
+    candidates = [c for c in out_dir.glob(f"{target_id}*") if c.is_file() and c.stat().st_size > 0]
+    if not candidates:
+        print(f"[!] Compilation completed, but no non-empty binary matching '{target_id}*' was found in {out_dir}!")
+        return False
+
+    print(f"[+] Successfully built target {target_id} with {fuzzer_id} -> {candidates[0]} ({candidates[0].stat().st_size:,} bytes)")
     return True
 
 
@@ -282,7 +300,10 @@ def cmd_build(args, config: Dict[str, Any]):
 
     for t in targets_to_build:
         for f in active_fuzzers:
-            build_target_binary(t, f, config)
+            success = build_target_binary(t, f, config)
+            if not success:
+                print(f"\n[FATAL] Compilation failed for target '{t['id']}' with fuzzer '{f['id']}'. Stopping build immediately!")
+                sys.exit(1)
 
 
 # ==============================================================================
@@ -297,7 +318,7 @@ def triage_crash(target_bin: str, target_args: str, crash_path: Path, target_loc
         "docker", "run", "--rm",
         "-v", f"{str(crash_path.parent).replace(os.sep, '/')}:/crash_dir:ro",
         "-v", f"{str(Path(target_bin).parent).replace(os.sep, '/')}:/bin_dir:ro",
-        "-e", "ASAN_OPTIONS=abort_on_error=1:symbolize=1:detect_leaks=0",
+        "-e", "ASAN_OPTIONS=abort_on_error=1:symbolize=1:detect_leaks=0:use_sigaltstack=0",
         image_tag,
         "bash", "-c",
         f"/bin_dir/{Path(target_bin).name} {target_args.replace('@@', f'/crash_dir/{crash_path.name}')}"
@@ -353,7 +374,7 @@ def run_single_trial(fuzzer: Dict[str, Any], target: Dict[str, Any], trial_idx: 
 
     # AFL command customized for each fuzzer architecture
     if fuzzer_id in ("aflgo_mod", "aflgo_orig", "windranger"):
-        afl_cmd = f"cd /target && afl-fuzz -m none -t 1000+ -z exp -c {cooling_time} -i /in -o /out -- /target/{Path(target_bin).name} {target_args}"
+        afl_cmd = f"cd /target && afl-fuzz -m none -t 1000+ -z exp -c {cooling_time}s -i /in -o /out -- /target/{Path(target_bin).name} {target_args}"
     else:
         # DAFL, FishFuzz (compile-time / runtime distance model without -z/-c)
         afl_cmd = f"cd /target && afl-fuzz -m none -t 1000+ -i /in -o /out -- /target/{Path(target_bin).name} {target_args}"
@@ -365,10 +386,21 @@ def run_single_trial(fuzzer: Dict[str, Any], target: Dict[str, Any], trial_idx: 
         f"-m={memory_limit}",
         "-e", "AFL_NO_UI=1",
         "-e", "AFL_SKIP_CPUFREQ=1",
+        "-e", "AFL_NO_AFFINITY=1",
         "-e", "AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1",
+        "-e", "ASAN_OPTIONS=abort_on_error=1:symbolize=0:detect_leaks=0:use_sigaltstack=0",
     ]
     if fuzzer_id == "fishfuzz":
         docker_run_cmd.extend(["-e", "TMP_DIR=/target/TEMP"])
+        (bin_dir / "TEMP" / "runtimes").mkdir(parents=True, exist_ok=True)
+        calldst = bin_dir / "TEMP" / "runtimes" / "calldst.json"
+        if not calldst.exists():
+            calldst.write_text("{}")
+    elif fuzzer_id == "windranger":
+        for fn in ("distance.txt", "targets.txt", "condition_info.txt"):
+            fpath = bin_dir / fn
+            if not fpath.exists():
+                fpath.touch()
 
     docker_run_cmd.extend([
         "-v", f"{str(bin_dir).replace(os.sep, '/')}:/target:ro",
@@ -670,7 +702,7 @@ def main():
     run_parser.add_argument("--fuzzer", type=str, help="Specific fuzzer to run")
     run_parser.add_argument("--trials", type=int, help="Number of trials per pair")
     run_parser.add_argument("--duration", type=str, help="Duration per trial (e.g. 10m, 1h, 12h)")
-    run_parser.add_argument("--workers", type=int, default=4, help="Max parallel workers")
+    run_parser.add_argument("--workers", type=int, default=None, help="Max parallel workers")
 
     # Command: analyze
     analyze_parser = subparsers.add_parser("analyze", help="Analyze logs, calculate stats and plot results")

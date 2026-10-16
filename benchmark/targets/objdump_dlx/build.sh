@@ -5,6 +5,8 @@
 # ==============================================================================
 set -euo pipefail
 
+export ASAN_OPTIONS="abort_on_error=1:detect_leaks=0:use_sigaltstack=0"
+
 MODE="${1:-all}"  # "pass1", "pass2", or "all"
 SRC_DIR="${SRC_DIR:-/src/binutils-gdb}"
 OUT_DIR="${OUT_DIR:-/out}"
@@ -31,7 +33,8 @@ mkdir -p "$OUT_DIR" "$WORK_DIR"
 cd "$SRC_DIR"
 
 # Set target lines for Directed Fuzzers
-echo "elf32-dlx.c:1340" > "$WORK_DIR/BBtargets.txt"
+echo "elf32-dlx.c:551" > "$WORK_DIR/BBtargets.txt"
+echo "elf32-dlx.c:544" >> "$WORK_DIR/BBtargets.txt"
 
 if [ "$MODE" = "pass1" ] || [ "$MODE" = "all" ]; then
     if [ -n "${DAFL:-}" ]; then
@@ -43,7 +46,9 @@ if [ "$MODE" = "pass1" ] || [ "$MODE" = "all" ]; then
 
         if [ -n "${AFLGO:-}" ]; then
             export ADDITIONAL="-targets=$WORK_DIR/BBtargets.txt -outdir=$WORK_DIR -flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
-        elif [ -n "${WINDRANGER:-}" ] || [ -n "${FF_AFL:-}" ]; then
+        elif [ -n "${FF_AFL:-}" ]; then
+            export ADDITIONAL="-pmode=origin -flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
+        elif [ -n "${WINDRANGER:-}" ]; then
             export ADDITIONAL="-flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
         else
             export ADDITIONAL=""
@@ -68,6 +73,9 @@ fi
 if [ "$MODE" = "distance" ] || [ "$MODE" = "all" ]; then
     if [ -n "${AFLGO:-}" ] && [ -f "$AFLGO/distance/gen_distance_fast.py" ]; then
         echo "[*] Calculating distances using AFLGo ($AFLGO)..."
+        if [ -f "$WORK_DIR/BBcalls.txt" ]; then
+            awk -F',' 'NF==2 && $1!="" && $2!=""' "$WORK_DIR/BBcalls.txt" > "$WORK_DIR/BBcalls.txt.clean" && mv "$WORK_DIR/BBcalls.txt.clean" "$WORK_DIR/BBcalls.txt"
+        fi
         python3 "$AFLGO/distance/gen_distance_fast.py" "$SRC_DIR/binutils" "$WORK_DIR" objdump
         echo "[*] Distance calculation complete: $WORK_DIR/distance.cfg.txt"
     elif [ -n "${FF_AFL:-}" ] && [ -f "$FF_AFL/scripts/gen_initial_distance.py" ]; then
@@ -89,6 +97,8 @@ if [ "$MODE" = "pass2" ] || [ "$MODE" = "all" ]; then
     # Clean previous build artifacts
     cd "$SRC_DIR"
     make clean || true
+    make distclean || true
+    find . -name "config.cache" -delete 2>/dev/null || true
 
     if [ -n "${AFLGO:-}" ]; then
         DISTANCE_FILE="$WORK_DIR/distance.cfg.txt"
@@ -98,6 +108,9 @@ if [ "$MODE" = "pass2" ] || [ "$MODE" = "all" ]; then
         fi
         export CFLAGS="-distance=$DISTANCE_FILE -fsanitize=address"
         export CXXFLAGS="-distance=$DISTANCE_FILE -fsanitize=address"
+    elif [ -n "${FF_AFL:-}" ]; then
+        export CFLAGS="-pmode=origin -fsanitize=address"
+        export CXXFLAGS="-pmode=origin -fsanitize=address"
     else
         export CFLAGS="-fsanitize=address"
         export CXXFLAGS="-fsanitize=address"

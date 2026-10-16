@@ -43,7 +43,7 @@ RUN update-alternatives --install /usr/bin/clang clang /usr/bin/clang-11 100 && 
 # Install Python packages required for graph distance calculations and metrics
 RUN pip3 install --no-cache-dir \
     networkx \
-    pydot \
+    "pydot<3.0.0" \
     pydotplus \
     pyyaml \
     pandas \
