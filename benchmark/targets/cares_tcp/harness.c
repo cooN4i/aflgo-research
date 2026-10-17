@@ -26,13 +26,14 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    unsigned char *buf = malloc(size);
+    unsigned char *buf = malloc(size + 1);
     if (!buf) {
         fclose(f);
         return 0;
     }
 
-    fread(buf, 1, size, f);
+    size_t nread = fread(buf, 1, size, f);
+    buf[nread] = '\0';
     fclose(f);
 
     ares_channel channel;

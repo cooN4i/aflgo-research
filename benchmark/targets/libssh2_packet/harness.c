@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <libssh2.h>
+#include <libssh2_publickey.h>
 
 int main(int argc, char **argv) {
     if (argc < 2) return 0;

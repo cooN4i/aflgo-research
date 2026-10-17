@@ -25,7 +25,48 @@ except ImportError:
     print("[!] PyYAML not installed. Run: pip install pyyaml")
     sys.exit(1)
 
-BENCH_ROOT = Path(__file__).resolve().parent
+# Auto-recover from WSL2 / DrvFS stale directory inode (avoids getcwd() FileNotFoundError)
+def _recover_wsl_cwd():
+    try:
+        os.getcwd()
+        return
+    except (FileNotFoundError, OSError):
+        pass
+
+    pwd = os.environ.get("PWD")
+    if pwd and os.path.exists(pwd):
+        try:
+            os.chdir(pwd)
+            return
+        except OSError:
+            pass
+
+    try:
+        if os.path.isabs(__file__):
+            script_dir = os.path.dirname(__file__)
+        else:
+            script_dir = os.path.dirname(os.path.join(pwd or "", __file__))
+        if script_dir and os.path.exists(script_dir):
+            os.chdir(script_dir)
+            return
+    except Exception:
+        pass
+
+    try:
+        os.chdir(".")
+    except OSError:
+        pass
+
+_recover_wsl_cwd()
+
+try:
+    BENCH_ROOT = Path(__file__).resolve().parent
+except Exception:
+    pwd = os.environ.get("PWD")
+    if pwd and os.path.exists(pwd):
+        BENCH_ROOT = Path(pwd)
+    else:
+        BENCH_ROOT = Path(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = BENCH_ROOT / "config.yaml"
 STORAGE_DIR = BENCH_ROOT / "storage"
 CACHE_DIR = STORAGE_DIR / "cache"
@@ -247,9 +288,14 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
         if [ -d "/fuzzer/aflgo-mod/instrument" ]; then export AFL_PATH="/fuzzer/aflgo-mod/instrument"; fi
         if [ -d "/fuzzer/aflgo-orig/instrument" ]; then export AFL_PATH="/fuzzer/aflgo-orig/instrument"; fi
         mkdir -p /src/{target_id} /work /tmp/recipe
+        cp -a /recipe/. /tmp/recipe/
         tr -d '\\r' < /recipe/build.sh > /tmp/recipe/build.sh
         chmod +x /tmp/recipe/build.sh
-        cp -a /src_cache/. /src/{target_id}/
+        if [ -d /src_cache/.git ]; then
+            tar --exclude=.git -cf - -C /src_cache . | tar -xf - -C /src/{target_id}/
+        else
+            cp -a /src_cache/. /src/{target_id}/
+        fi
         cd /src/{target_id}
         ASAN_OPTIONS="abort_on_error=1:detect_leaks=0:use_sigaltstack=0" SRC_DIR="/src/{target_id}" WORK_DIR="/work" OUT_DIR="/out" /tmp/recipe/build.sh all
         """
@@ -348,7 +394,13 @@ def run_single_trial(fuzzer: Dict[str, Any], target: Dict[str, Any], trial_idx: 
     # Find compiled binary
     candidates = [c for c in bin_dir.glob(f"{target_id}*") if c.is_file()]
     if not candidates:
-        return {"error": f"Binary not found in {bin_dir}"}
+        return {
+            "fuzzer": fuzzer_id,
+            "target": target_id,
+            "trial": trial_idx,
+            "status": "ERROR",
+            "error": f"Binary not found in {bin_dir}. Did you run 'bench.py build --target={target_id}' first?"
+        }
     target_bin = str(candidates[0])
 
     run_dir = (RUNS_DIR / fuzzer_id / target_id / f"trial_{trial_idx}").resolve()
@@ -489,7 +541,10 @@ def cmd_run(args, config: Dict[str, Any]):
     trials = args.trials or config['experiment']['trials']
     max_workers = args.workers or config['resources']['max_parallel_workers']
 
-    targets = [t for t in config['targets'] if (args.target is None or t['id'] == args.target) and t.get('enabled', True)]
+    if args.target:
+        targets = [t for t in config['targets'] if t['id'] == args.target]
+    else:
+        targets = [t for t in config['targets'] if t.get('enabled', True)]
     fuzzers = [f for f in config['fuzzers'] if (args.fuzzer is None or f['id'] == args.fuzzer)]
 
     print(f"[*] Configuration: Duration={duration_str} ({duration_sec}s), Trials={trials}, Workers={max_workers}")
@@ -513,7 +568,10 @@ def cmd_run(args, config: Dict[str, Any]):
         for fut in futures:
             try:
                 res = fut.result()
-                print(f"[+] Completed: {res.get('fuzzer')} on {res.get('target')} trial {res.get('trial')}: {res.get('status')}")
+                if "error" in res:
+                    print(f"[!] Error: {res.get('fuzzer')} on {res.get('target')} trial {res.get('trial')}: {res['error']}")
+                else:
+                    print(f"[+] Completed: {res.get('fuzzer')} on {res.get('target')} trial {res.get('trial')}: {res.get('status')}")
             except Exception as e:
                 print(f"[!] Trial error: {e}")
 

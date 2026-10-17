@@ -89,28 +89,28 @@ targets:
     name: "GNU Binutils objdump (DLX ELF OOB Write)"
     exploitarium_dir: "objdump-dlx-calc-poc"
     path: "targets/objdump_dlx"
-    enabled: true
+    enabled: false
 
   - id: "ffmpeg_rasc"
     name: "FFmpeg RASC Decoder (decode_dlta OOB Write)"
     exploitarium_dir: "ffmpeg-rasc-dlta-calc-poc"
     path: "targets/ffmpeg_rasc"
-    enabled: true
+    enabled: false
 
   - id: "vlc_vp9"
     name: "FFmpeg/VLC VP9 Decoder (Slice-Thread Overwrite)"
     exploitarium_dir: "vlc-vp9-reschange-crash-poc"
     path: "targets/vlc_vp9"
-    enabled: true
+    enabled: false
 
   - id: "cares_tcp"
     name: "c-ares DNS Library (ares_getaddrinfo UAF)"
     exploitarium_dir: "c-ares-tcp-uaf-calc-poc"
     path: "targets/cares_tcp"
-    enabled: true
+    enabled: false
 
   - id: "libssh2_packet"
     name: "libssh2 (packet_length Integer Wrap)"
     exploitarium_dir: "libssh2-cve-2026-55200-poc"
     path: "targets/libssh2_packet"
-    enabled: true
+    enabled: false

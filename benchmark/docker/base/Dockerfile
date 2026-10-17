@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y \
     gdb \
     libarchive-tools \
     graphviz \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set clang-11 as default compiler and configure gold linker

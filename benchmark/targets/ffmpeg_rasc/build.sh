@@ -20,7 +20,8 @@ mkdir -p "$OUT_DIR" "$WORK_DIR"
 cd "$SRC_DIR"
 
 # Set target lines for Directed Fuzzers
-echo "rasc.c:292" > "$WORK_DIR/BBtargets.txt"
+echo "rasc.c:288" > "$WORK_DIR/BBtargets.txt"
+echo "rasc.c:291" >> "$WORK_DIR/BBtargets.txt"
 
 if [ "$MODE" = "pass1" ] || [ "$MODE" = "all" ]; then
     if [ -n "${DAFL:-}" ]; then
@@ -32,21 +33,27 @@ if [ "$MODE" = "pass1" ] || [ "$MODE" = "all" ]; then
         make distclean || true
 
         if [ -n "${AFLGO:-}" ]; then
-            export ADDITIONAL="-targets=$WORK_DIR/BBtargets.txt -outdir=$WORK_DIR -flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
+            ADD_CFLAGS="-targets=$WORK_DIR/BBtargets.txt -outdir=$WORK_DIR -flto -fuse-ld=gold"
+            ADD_LDFLAGS="-flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
         elif [ -n "${FF_AFL:-}" ]; then
-            export ADDITIONAL="-pmode=origin -flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
+            ADD_CFLAGS="-pmode=origin -flto -fuse-ld=gold"
+            ADD_LDFLAGS="-flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
         elif [ -n "${WINDRANGER:-}" ]; then
-            export ADDITIONAL="-flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
+            ADD_CFLAGS="-flto -fuse-ld=gold"
+            ADD_LDFLAGS="-flto -fuse-ld=gold -Wl,-plugin-opt=save-temps"
         else
-            export ADDITIONAL=""
+            ADD_CFLAGS=""
+            ADD_LDFLAGS=""
         fi
-        export CFLAGS="${CFLAGS:-} $ADDITIONAL"
-        export CXXFLAGS="${CXXFLAGS:-} $ADDITIONAL"
+
+        unset CFLAGS CXXFLAGS LDFLAGS
 
         ./configure --cc="$CC" --cxx="$CXX" \
-                    --extra-cflags="$CFLAGS" \
-                    --extra-ldflags="$CFLAGS" \
+                    --host-cc="clang" \
+                    --extra-cflags="$ADD_CFLAGS" \
+                    --extra-ldflags="$ADD_LDFLAGS" \
                     --disable-shared --enable-static \
+                    --disable-x86asm \
                     --disable-doc --disable-programs --enable-ffmpeg \
                     --disable-everything --enable-decoder=rasc \
                     --enable-demuxer=avi --enable-protocol=file
@@ -67,7 +74,7 @@ if [ "$MODE" = "distance" ] || [ "$MODE" = "all" ]; then
         echo "[*] Distance calculation complete: $WORK_DIR/distance.cfg.txt"
     elif [ -n "${FF_AFL:-}" ] && [ -f "$FF_AFL/scripts/gen_initial_distance.py" ]; then
         echo "[*] Calculating distances using FishFuzz ($FF_AFL)..."
-        python3 "$FF_AFL/scripts/gen_initial_distance.py" -t "$WORK_DIR" || true
+        python3 "$FF_AFL/scripts/gen_initial_distance.py" "$WORK_DIR" || true
     elif [ -n "${WINDRANGER:-}" ]; then
         echo "[*] Processing Deviation Basic Blocks with WindRanger ($WINDRANGER)..."
         if [ -f "$SRC_DIR/ffmpeg_g.0.0.preopt.bc" ]; then
@@ -86,26 +93,28 @@ if [ "$MODE" = "pass2" ] || [ "$MODE" = "all" ]; then
     make distclean || true
     find . -name "config.cache" -delete 2>/dev/null || true
 
+    unset CFLAGS CXXFLAGS LDFLAGS
+    export ASAN_OPTIONS="abort_on_error=1:detect_leaks=0:use_sigaltstack=0"
+
     if [ -n "${AFLGO:-}" ]; then
         DISTANCE_FILE="$WORK_DIR/distance.cfg.txt"
         if [ ! -f "$DISTANCE_FILE" ]; then
             touch "$DISTANCE_FILE"
         fi
-        export CFLAGS="-distance=$DISTANCE_FILE -fsanitize=address"
-        export CXXFLAGS="-distance=$DISTANCE_FILE -fsanitize=address"
+        PASS2_CFLAGS="-distance=$DISTANCE_FILE -fsanitize=address"
     elif [ -n "${FF_AFL:-}" ]; then
-        export CFLAGS="-pmode=origin -fsanitize=address"
-        export CXXFLAGS="-pmode=origin -fsanitize=address"
+        PASS2_CFLAGS="-pmode=origin -fsanitize=address"
     else
-        export CFLAGS="-fsanitize=address"
-        export CXXFLAGS="-fsanitize=address"
+        PASS2_CFLAGS="-fsanitize=address"
     fi
-    export LDFLAGS="-fsanitize=address"
+    PASS2_LDFLAGS="-fsanitize=address"
 
     ./configure --cc="$CC" --cxx="$CXX" \
-                --extra-cflags="$CFLAGS" \
-                --extra-ldflags="$LDFLAGS" \
+                --host-cc="clang" \
+                --extra-cflags="$PASS2_CFLAGS" \
+                --extra-ldflags="$PASS2_LDFLAGS" \
                 --disable-shared --enable-static \
+                --disable-x86asm \
                 --disable-doc --disable-programs --enable-ffmpeg \
                 --disable-everything --enable-decoder=rasc \
                 --enable-demuxer=avi --enable-protocol=file
