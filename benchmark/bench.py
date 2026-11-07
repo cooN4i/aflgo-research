@@ -74,7 +74,35 @@ BINARIES_DIR = STORAGE_DIR / "binaries"
 RUNS_DIR = STORAGE_DIR / "runs"
 PLOTS_DIR = STORAGE_DIR / "plots"
 
-HOST_WORKDIR = os.environ.get("HOST_WORKDIR")
+def _detect_host_workdir() -> Optional[str]:
+    # 1. Explicit env var
+    hw = os.environ.get("HOST_WORKDIR")
+    if hw:
+        return hw
+    # 2. Auto-detect from container inspect (Docker-outside-of-Docker host path discovery)
+    for cname in ["dgf-benchmark-orchestrator", os.environ.get("HOSTNAME", "")]:
+        if not cname:
+            continue
+        try:
+            res = subprocess.run(
+                ["docker", "inspect", cname],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                data = json.loads(res.stdout)
+                if data and isinstance(data, list):
+                    mounts = data[0].get("Mounts", [])
+                    for m in mounts:
+                        if m.get("Destination") == "/benchmark":
+                            src = m.get("Source")
+                            if src:
+                                return src
+        except Exception:
+            pass
+    return None
+
+
+HOST_WORKDIR = _detect_host_workdir()
 
 
 def to_docker_host_path(p: Union[str, Path]) -> str:

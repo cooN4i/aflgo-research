@@ -1,252 +1,237 @@
 # DGF Benchmark (Directed Greybox Fuzzing)
 
-Автономный воспроизводимый бенчмарк для сравнительной оценки **5 направленных фаззеров (Directed Greybox Fuzzers)** на реальных уязвимостях из базы `bikini/exploitarium`.
+Автономный воспроизводимый бенчмарк для сравнительной оценки **5 современных направленных серых фаззеров (Directed Greybox Fuzzers)** на 5 подтвержденных уязвимостях реального мира (FSE '24 / DAFL).
+
+Бенчмарк полностью управляется через единый конфигурационный файл [`config.yaml`](config.yaml) и запускается одной командой через Docker Compose:
+
+```bash
+docker compose up -d
+```
 
 ---
 
 ## 📑 Содержание
 1. [Состав бенчмарка](#1-состав-бенчмарка)
-2. [Клонирование репозитория](#2-клонирование-репозитория)
-3. [Системные требования и подготовка](#3-системные-требования-и-подготовка)
+   - [Сравниваемые фаззеры](#сравниваемые-фаззеры-5-dgf)
+   - [Исследуемые уязвимости](#исследуемые-уязвимости-5-real-world-targets)
+   - [Оцениваемые метрики (TTT vs TTE)](#оцениваемые-метрики-ttt-vs-tte)
+2. [Быстрый старт (One-Command Run)](#2-быстрый-старт-one-command-run)
+3. [Клонирование на чистый сервер](#3-клонирование-на-чистый-сервер)
 4. [Конфигурация (config.yaml)](#4-конфигурация-configyaml)
-5. [Сборка (Build Phase)](#5-сборка-build-phase)
-   - [5.1. Собрать всё разом](#51-собрать-всё-разом-one-command)
-   - [5.2. Сборка Docker-образов фаззеров](#52-сборка-docker-образов-фаззеров)
-   - [5.3. Сборка целей с инструментацией](#53-сборка-целей-с-инструментацией)
-6. [Запуск фаззинг-кампаний (Run Phase)](#6-запуск-фаззинг-кампаний-run-phase)
-   - [6.1. Запуск всех экспериментов](#61-запуск-всех-экспериментов)
-   - [6.2. Запуск конкретной цели или фаззера](#62-запуск-конкретной-цели-или-фаззера)
-7. [Анализ результатов (Analyze Phase)](#7-анализ-результатов-analyze-phase)
-8. [Структура каталогов](#8-структура-каталогов)
+5. [Архитектура оркестратора](#5-архитектура-оркестратора)
+6. [Альтернативный запуск напрямую (CLI)](#6-альтернативный-запуск-напрямую-cli)
+7. [Результаты и отчеты](#7-результаты-и-отчеты)
+8. [Структура репозитория](#8-структура-репозитория)
 
 ---
 
 ## 1. Состав бенчмарка
 
 ### Сравниваемые фаззеры (5 DGF):
-| Фаззер | Архитектурная роль / Принцип | Источник кода |
+| Фаззер | Архитектурная роль / Принцип | Репозиторий / Источник |
 | :--- | :--- | :--- |
-| **`aflgo_mod`** | Кандидатная модификация (сложность блоков + энтропия + доминаторы) | `aflgo-research` (develop) |
-| **`aflgo_orig`** | Базовый эталон (Vanilla AFLGo, CCS '17) | `aflgo-research` (develop) |
-| **`dafl`** | Селективная инструментация среза функций (USENIX Sec '23) | `prosyslab/DAFL` |
-| **`fishfuzz`** | Мульти-дистанции и динамический ранкинг (USENIX Sec '23) | `HexHive/FishFuzz` |
-| **`windranger`** | Блоки отклонения DBB + анализ недостижимости (ICSE '22) | `prosyslab/DAFL-artifact` |
+| **`aflgo_mod`** | **Кандидат (наша модификация):** учет цикломатической сложности блоков, энтропии и дерева доминаторов | [aflgo-research](https://github.com/cooN4i/aflgo-research) (branch: `develop`) |
+| **`aflgo_orig`** | **Базовый эталон:** классический Vanilla AFLGo (ACM CCS '17) | [aflgo-research](https://github.com/cooN4i/aflgo-research) (branch: `develop`) |
+| **`dafl`** | **SotA:** селективная инструментация и скоринг функций (USENIX Security '23) | `prosyslab/DAFL` |
+| **`fishfuzz`** | **SotA:** мульти-дистанции и динамический ранкинг таргетов (USENIX Security '23) | `HexHive/FishFuzz` |
+| **`windranger`** | **SotA:** анализ блоков отклонения (DBB) и недостижимости (ICSE '22) | `prosyslab/DAFL-artifact` |
 
-### Реальные уязвимости (5 Real-world Targets):
-1. **`objdump_dlx`** — GNU Binutils `objdump` (DLX ELF OOB Write, `elf32-dlx.c:1340`)
-2. **`ffmpeg_rasc`** — FFmpeg RASC Decoder (`decode_dlta` OOB Write)
-3. **`vlc_vp9`** — FFmpeg/VLC VP9 Video Decoder (Slice-Thread Memory Corruption)
-4. **`cares_tcp`** — c-ares C DNS Resolver Library (`ares_getaddrinfo` Use-After-Free)
-5. **`libssh2_packet`** — libssh2 SSH Transport (`packet_length` Integer Wrap / Out-of-bounds)
+### Исследуемые уязвимости (5 Real-world Targets):
+Отобраны сложные уязвимости со временем обнаружения от 12 до 24 часов:
+1. **`cxxfilt`** — GNU Binutils `cxxfilt` (CVE-2016-4487 Demangle Invalid Free / UAF, `cplus-dem.c:4319`)
+2. **`swftophp_20427`** — Libming `swftophp` (CVE-2018-20427 Action Compiler Null Dereference, `actioncompiler.c:98`)
+3. **`swftophp_12982`** — Libming `swftophp` (CVE-2019-12982 Decompile Heap Out-Of-Bounds, `decompile.c:398`)
+4. **`objdump_8397`** — GNU Binutils `objdump` (CVE-2017-8397 DWARF Reloc Heap Overflow, `dwarf.c:7554`)
+5. **`nm_14940`** — GNU Binutils `nm-new` (CVE-2017-14940 ELF Version Information Crash, `elf.c:1997`)
+
+### Оцениваемые метрики (TTT vs TTE):
+В соответствии с научными стандартами исследования DGF метрики разделены на два независимых этапа:
+- **TTT (Time-to-Target / $T_{\text{reach}}$)** — время (в секундах) и число выполнений (**ETT**) до первого реального попадания потока управления в целевой уязвимый базовый блок кода (верифицируется точкой останова GDB Breakpoint на каждом новом сиде из очереди).
+- **TTE (Time-to-Exposure / $T_{\text{trigger}}$)** — время (в секундах) и число выполнений (**ETE**) до первого реального воспроизведения уязвимости / краша (верифицируется триажем AddressSanitizer и GDB stack trace).
+- **Reach Rate & Trigger Rate** — процент успешных триалов, достигших цели и вызвавших краш за отведенный лимит времени.
+- **Статистика Манна-Уитни ($p$-value)** и непараметрический размер эффекта **Варги-Делейни ($\hat{A}_{12}$)** против базового фаззера.
 
 ---
 
-## 2. Клонирование репозитория
+## 2. Быстрый старт (One-Command Run)
+
+Для запуска всего эксперимента не требуется устанавливать Python-библиотеки или настраивать пути. Достаточно установленного Docker и Docker Compose:
+
 ```bash
+docker compose up -d
+```
+
+### Что произойдет автоматически:
+1. **Сборка (Build)**: соберутся базовый Docker-образ, образы активных фаззеров и скомпилируются бинарники активных уязвимостей (уже собранные бинарники пропускаются мгновенно).
+2. **Запуск (Run)**: запустятся параллельные контейнеры фаззинга с жесткой изоляцией CPU (1 физическое ядро на триал) и лимитом памяти (2 ГБ на контейнер).
+3. **Анализ (Analyze)**: фоновый триаж в реальном времени собирает TTT/TTE, а по завершении строит статистический Markdown-отчет.
+4. **Архивация**: формируется готовый архив `results.tar.gz` со всеми сырыми данными кампаний и отчетом.
+
+### Мониторинг процесса:
+```bash
+# Просмотр логов оркестратора
+docker logs -f dgf-benchmark-orchestrator
+
+# Просмотр запущенных фаззеров и нагрузки на ядра
+docker ps
+docker stats
+```
+
+### Остановка эксперимента:
+```bash
+docker compose down
+```
+
+---
+
+## 3. Клонирование на чистый сервер
+
+Репозиторий публичный, поэтому для развертывания на новом сервере Ubuntu/Debian **не требуются SSH-ключи или настройка профиля Git**:
+
+```bash
+# 1. Установка Git и Docker (если не установлены)
+sudo apt update && sudo apt install -y git docker.io docker-compose-v2
+
+# 2. Клонирование репозитория
 git clone https://github.com/cooN4i/dgf-benchmark.git
 cd dgf-benchmark
-```
 
----
-
-## 3. Системные требования и подготовка
-
-- **ОС:** Linux (Ubuntu 20.04/22.04 LTS) или Windows 10/11 с WSL2 + Docker Desktop.
-- **Docker:** Docker Engine 20.10+ (с поддержкой Docker BuildKit).
-- **Python:** 3.8 или новее.
-- **Память и CPU:** От 16 ГБ RAM, 4+ ядер CPU.
-
-### Установка зависимостей Python:
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### Настройка ядра хоста под AFL (только для Linux/WSL):
-```bash
-echo core | sudo tee /proc/sys/kernel/core_pattern
-echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+# 3. Запуск бенчмарка
+docker compose up -d
 ```
 
 ---
 
 ## 4. Конфигурация (config.yaml)
 
-Все параметры эксперимента, лимиты ресурсов, списки активных фаззеров и уязвимостей настраиваются в файле `config.yaml`:
+Файл [`config.yaml`](config.yaml) является **единственным источником правды**. Любые изменения проводятся в нем без правки исходного кода.
 
+### Пример настройки для тестового прогона (1 фаззер, 1 триал, 24 часа):
 ```yaml
-# Ограничения аппаратных ресурсов
 resources:
-  cpu_per_trial: 1           # Изоляция: ровно 1 физическое ядро на инстанс фаззера
-  memory_limit: "4g"         # Лимит RAM на один контейнер
-  max_parallel_workers: 4    # Число одновременно работающих контейнеров
+  cpu_per_trial: 1           # 1 ядро на контейнер
+  memory_limit: "2g"         # Максимум 2 ГБ RAM на контейнер
+  max_parallel_workers: 5    # До 5 одновременных задач
 
-# Параметры по умолчанию для кампаний
 experiment:
-  duration: "12h"            # Длительность кампании (например: 30m, 1h, 8h, 12h)
-  trials: 5                  # Количество повторений (триалов) для статистики
-  metric_poll_interval: 30   # Частота опроса метрик и проверки крашей (в секундах)
+  duration: "24h"            # Длительность триала (24h, 12h, 1h, 30m)
+  trials: 1                  # Число повторений на пару (фаззер, таргет)
+  metric_poll_interval: 30   # Опрос TTT/TTE каждые 30 сек
 
-# Список сравниваемых фаззеров (можно временно отключать через enabled: false)
 fuzzers:
   - id: "aflgo_mod"
-    enabled: true
+    enabled: true            # Включаем наш фаззер
   - id: "aflgo_orig"
-    enabled: true
+    enabled: false           # Базовые фаззеры отключены для быстрого теста
   - id: "dafl"
-    enabled: true
+    enabled: false
   - id: "fishfuzz"
-    enabled: true
+    enabled: false
   - id: "windranger"
-    enabled: true
+    enabled: false
 
-# Список исследуемых уязвимостей
 targets:
-  - id: "objdump_dlx"
+  - id: "cxxfilt"
     enabled: true
-  - id: "ffmpeg_rasc"
+  - id: "swftophp_20427"
     enabled: true
-  - id: "vlc_vp9"
+  - id: "swftophp_12982"
     enabled: true
-  - id: "cares_tcp"
+  - id: "objdump_8397"
     enabled: true
-  - id: "libssh2_packet"
+  - id: "nm_14940"
     enabled: true
 ```
 
-### Просмотр текущей конфигурации:
-Вывести сводную таблицу активных фаззеров, целей и ресурсов:
+### Как переключить на финальный прогон для статьи/научрука:
+Просто поменяйте в [`config.yaml`](config.yaml):
+- Всем фаззерам поставьте `enabled: true`.
+- Укажите `trials: 10` и `duration: "12h"`.
+- Снова выполните `docker compose up -d`.
+
+---
+
+## 5. Архитектура оркестратора
+
+Оркестратор построен по стандарту **Docker-outside-of-Docker (DooD)**:
+- Контейнер `dgf-benchmark-orchestrator` монтирует Docker-сокет сервера (`/var/run/docker.sock`) и рабочий каталог.
+- Внутри оркестратора скрипт `bench.py` управляет жизненным циклом рабочих контейнеров `dgf_run_<fuzzer>_<target>_t<trial>`.
+- Изоляция ядер: каждое испытание привязывается к выделенному ядру CPU через `--cpuset-cpus`.
+- Ограничение памяти: флаг `-m 2g` предотвращает сбои OOM-killer и зависания сервера.
+- Автоматический расчет хостовых путей (`to_docker_host_path`) исключает конфликты путей монтирования между контейнером и хостом.
+
+---
+
+## 6. Альтернативный запуск напрямую (CLI)
+
+Если вы хотите запускать этапы вручную на хосте (без использования Docker Compose):
+
 ```bash
+# Установка зависимостей Python
+pip install pyyaml scipy numpy
+
+# 1. Посмотреть статус конфигурации
 python3 bench.py info
-```
 
----
-
-## 5. Сборка (Build Phase)
-
-### 5.1. Собрать ВСЁ разом (One-Command)
-Команда соберет базовый Docker-образ, образы всех 5 фаззеров и скомпилирует инструментрованные бинарники всех 5 целей под каждый фаззер (25 бинарников):
-```bash
+# 2. Собрать образы и бинарники (только включенные в config.yaml)
 python3 bench.py build --all
-```
 
----
+# 3. Запустить кампании согласно config.yaml
+python3 bench.py run
 
-### 5.2. Сборка Docker-образов фаззеров
-Если требуется пересобрать только окружение или конкретный фаззер:
-
-```bash
-# Сборка базового образа (LLVM 11, Clang, Gold Linker):
-python3 bench.py build --base
-
-# Сборка конкретного фаззера:
-python3 bench.py build --fuzzer aflgo_mod
-python3 bench.py build --fuzzer aflgo_orig
-python3 bench.py build --fuzzer dafl
-python3 bench.py build --fuzzer fishfuzz
-python3 bench.py build --fuzzer windranger
-```
-
----
-
-### 5.3. Сборка целей с инструментацией
-
-```bash
-# Собрать одну конкретную цель под ВСЕ 5 фаззеров:
-python3 bench.py build --target cares_tcp
-python3 bench.py build --target libssh2_packet
-python3 bench.py build --target vlc_vp9
-python3 bench.py build --target ffmpeg_rasc
-python3 bench.py build --target objdump_dlx
-
-# Собрать конкретную цель под конкретный фаззер:
-python3 bench.py build --target cares_tcp --fuzzer aflgo_mod
-python3 bench.py build --target libssh2_packet --fuzzer windranger
-```
-
-Скомпилированные исполняемые файлы и сиды сохраняются в:
-`storage/binaries/<fuzzer_id>/<target_id>/`
-
----
-
-## 6. Запуск фаззинг-кампаний (Run Phase)
-
-Каждый инстанс фаззера стартует в изолированном Docker-контейнере с жесткой привязкой к ядру CPU (`--cpuset-cpus`), лимитом памяти и мониторингом крашей AddressSanitizer.
-
-### 6.1. Запуск всех экспериментов
-Запуск полного набора кампаний по всем целям и фаззерам:
-```bash
-# Кампания на 30 минут по 1 повторению на 4 параллельных воркерах:
-python3 bench.py run --duration 30m --trials 1 --workers 4
-
-# Полноценный научный эксперимент (например, 5 повторений по 12 часов):
-python3 bench.py run --duration 12h --trials 5 --workers 4
-```
-
----
-
-### 6.2. Запуск конкретной цели или фаззера
-
-```bash
-# Запустить одну цель на ВСЕХ 5 фаззерах (30 минут):
-python3 bench.py run --target cares_tcp --duration 30m
-python3 bench.py run --target libssh2_packet --duration 30m
-python3 bench.py run --target vlc_vp9 --duration 30m
-
-# Запустить конкретный фаззер на конкретной цели:
-python3 bench.py run --target cares_tcp --fuzzer aflgo_mod --duration 30m
-python3 bench.py run --target objdump_dlx --fuzzer dafl --duration 1h
-
-# С указанием числа параллельных потоков и повторений:
-python3 bench.py run --target libssh2_packet --fuzzer aflgo_mod --trials 3 --duration 1h --workers 3
-```
-
----
-
-## 7. Анализ результатов (Analyze Phase)
-
-После завершения кампаний запустите модуль статистической обработки:
-```bash
+# 4. Провести статистический анализ существующих результатов
 python3 bench.py analyze
 ```
 
-### Что делает анализ:
-1. Сканирует все триалы в `storage/runs/`.
-2. Вычисляет робастные научные метрики: **TTT** (Time-To-Target), **ETT** (Execs-To-Target), **Success Rate**, **Median & IQR**.
-3. Выполняет двусторонний тест **Манна-Уитни ($U$-test)** на статистическую значимость ($p$-value).
-4. Рассчитывает непараметрический размер эффекта **Варги-Делейни ($\hat{A}_{12}$)** для сравнения `aflgo_mod` с каждым из конкурентов.
-5. Генерирует Markdown-отчет со сводными таблицами:  
-   `storage/plots/benchmark_report.md`
+---
+
+## 7. Результаты и отчеты
+
+После завершения кампаний оркестратор упаковывает все результаты в архив:
+`results.tar.gz`
+
+Внутри архива:
+1. `storage/plots/benchmark_report.md` — сформированный отчет со сводными таблицами:
+   - Reach Rate, Median TTT, IQR TTT, Median ETT.
+   - Trigger Rate, Median TTE, IQR TTE, Median ETE.
+   - Значения $p$-value теста Манна-Уитни и размер эффекта Варги-Делейни ($\hat{A}_{12}$).
+2. `storage/runs/<fuzzer>/<target>/trial_<N>/` — сырые данные:
+   - `out/crashes/` — найденные краширующие входы.
+   - `out/queue/` — эволюция тестовой очереди.
+   - `out/fuzzer_stats` и `out/plot_data` — поминутная динамика скорости и покрытия.
+   - `trial_result.json` — точные тайминги TTT и TTE с подтвержденными трейсами.
+3. `config.yaml` — точный конфиг, на котором проводился расчет.
 
 ---
 
-## 8. Структура каталогов
+## 8. Структура репозитория
 
 ```text
 .
-├── bench.py               # Главный CLI-оркестратор бенчмарка
-├── config.yaml            # Конфигурация целей, фаззеров, таймингов и ядер
-├── requirements.txt       # Python-зависимости (scipy, numpy, pyyaml, pandas, matplotlib)
-├── .gitignore             # Исключает кэш, бинарники и результаты прогонов
+├── docker-compose.yml       # Единая точка запуска бенчмарка (docker compose up -d)
+├── config.yaml              # Конфигурация фаззеров, целей, ресурсов и метрик
+├── bench.py                 # Главный оркестратор (build, run, triage, analyze)
 ├── docker/
 │   ├── base/
-│   │   └── Dockerfile     # Базовый образ (LLVM 11, Clang, ASan, OpenSSL, CMake)
-│   └── fuzzers/           # Рецепты сборки Docker-образов каждого фаззера
-│       ├── aflgo_mod.Dockerfile
-│       ├── aflgo_orig.Dockerfile
-│       ├── dafl.Dockerfile
-│       ├── fishfuzz.Dockerfile
-│       └── windranger.Dockerfile
-├── targets/               # Рецепты сборки уязвимостей
-│   ├── cares_tcp/         # c-ares (harness.c, build.sh, target.yaml, seeds/)
-│   ├── ffmpeg_rasc/       # FFmpeg (build.sh, target.yaml)
-│   ├── libssh2_packet/    # libssh2 (harness.c, build.sh, target.yaml, seeds/)
-│   ├── objdump_dlx/       # GNU Binutils (build.sh, target.yaml, seeds/)
-│   └── vlc_vp9/           # VLC Media Player (build.sh, target.yaml)
-└── storage/               # Генерируемые данные (не коммитятся в git)
-    ├── cache/             # Чистые клоны апстримов уязвимостей
-    ├── binaries/          # Скомпилированные инструментрованные бинарники
-    ├── runs/              # Логи, результаты прогонов, очереди и краши фаззеров
-    └── plots/             # Статистические отчеты и графики
+│   │   └── Dockerfile       # Базовый компиляторный образ (Ubuntu 22.04, LLVM 11, Clang)
+│   ├── fuzzers/             # Dockerfile'ы каждого из 5 фаззеров
+│   │   ├── aflgo_mod.Dockerfile
+│   │   ├── aflgo_orig.Dockerfile
+│   │   ├── dafl.Dockerfile
+│   │   ├── fishfuzz.Dockerfile
+│   │   └── windranger.Dockerfile
+│   └── orchestrator/        # Образ раннера для docker-compose
+│       ├── Dockerfile
+│       └── entrypoint.sh
+├── targets/                 # Рецепты сборки уязвимостей реального мира
+│   ├── cxxfilt/             # CVE-2016-4487 (target.yaml, build.sh, seeds/)
+│   ├── swftophp_20427/      # CVE-2018-20427 (target.yaml, build.sh, seeds/)
+│   ├── swftophp_12982/      # CVE-2019-12982 (target.yaml, build.sh, seeds/)
+│   ├── objdump_8397/        # CVE-2017-8397 (target.yaml, build.sh, seeds/)
+│   └── nm_14940/            # CVE-2017-14940 (target.yaml, build.sh, seeds/)
+└── storage/                 # Директория артефактов (в .gitignore)
+    ├── cache/               # Исходные коды целевых программ
+    ├── binaries/            # Скомпилированные под каждый фаззер бинарники
+    ├── runs/                # Выходные данные фаззинга и краши
+    └── plots/               # Markdown-отчеты и графики
 ```

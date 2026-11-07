@@ -11,5 +11,6 @@ services:
       - ./benchmark:/benchmark
     environment:
       - PYTHONUNBUFFERED=1
+      - HOST_WORKDIR=${PWD}/benchmark
     network_mode: host
 

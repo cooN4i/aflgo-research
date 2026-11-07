@@ -13,8 +13,8 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 echo "[*] Step 1: Building fuzzer base and images if needed..."
-python3 bench.py build --base || true
-python3 bench.py build --all || true
+python3 bench.py build --base
+python3 bench.py build --all
 
 echo "[*] Step 2: Running benchmark trials according to config.yaml..."
 python3 bench.py run
