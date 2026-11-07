@@ -4,3 +4,5 @@ storage/runs/
 storage/plots/
 __pycache__/
 *.pyc
+.DS_Store
+results.tar.gz

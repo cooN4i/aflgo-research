@@ -17,7 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:
     import yaml
@@ -73,6 +73,20 @@ CACHE_DIR = STORAGE_DIR / "cache"
 BINARIES_DIR = STORAGE_DIR / "binaries"
 RUNS_DIR = STORAGE_DIR / "runs"
 PLOTS_DIR = STORAGE_DIR / "plots"
+
+HOST_WORKDIR = os.environ.get("HOST_WORKDIR")
+
+
+def to_docker_host_path(p: Union[str, Path]) -> str:
+    """Translates a path to the host Docker daemon perspective when running inside an orchestrator container."""
+    p_obj = Path(p).resolve()
+    if HOST_WORKDIR:
+        try:
+            rel = p_obj.relative_to(BENCH_ROOT.resolve())
+            return str(Path(HOST_WORKDIR) / rel).replace(os.sep, "/")
+        except ValueError:
+            pass
+    return str(p_obj).replace(os.sep, "/")
 
 
 def load_config() -> Dict[str, Any]:
@@ -135,7 +149,19 @@ def cmd_info(args, config: Dict[str, Any]):
 # ==============================================================================
 # Command: build
 # ==============================================================================
+def docker_image_exists(tag: str) -> bool:
+    try:
+        res = subprocess.run(["docker", "image", "inspect", tag], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
 def build_base_image():
+    if docker_image_exists("dgf-base:latest") or docker_image_exists("dgf-base"):
+        print("[+] Base Docker Image 'dgf-base' already exists (skipping build).\n")
+        return
+
     print("[*] Building Base Docker Image (dgf-base)...")
     base_dockerfile = BENCH_ROOT / "docker" / "base" / "Dockerfile"
     cmd = [
@@ -169,6 +195,11 @@ def get_remote_branch_sha(repo_url: str, branch: str) -> Optional[str]:
 
 
 def build_fuzzer_image(fuzzer_id: str, branch: str = "develop"):
+    image_tag = f"dgf-fuzzer-{fuzzer_id}"
+    if docker_image_exists(f"{image_tag}:latest") or docker_image_exists(image_tag):
+        print(f"[+] Fuzzer Image '{image_tag}' already exists (skipping build).\n")
+        return
+
     print(f"[*] Building Fuzzer Docker Image for {fuzzer_id}...")
     fuzzers_dir = BENCH_ROOT / "docker" / "fuzzers"
     dockerfiles = {
@@ -274,9 +305,9 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
         "docker", "run", "--rm",
         "--name", container_name,
         "-e", "ASAN_OPTIONS=abort_on_error=1:detect_leaks=0:use_sigaltstack=0",
-        "-v", f"{str(recipe_dir).replace(os.sep, '/')}:/recipe:ro",
-        "-v", f"{str(source_cache).replace(os.sep, '/')}:/src_cache:ro",
-        "-v", f"{str(out_dir).replace(os.sep, '/')}:/out",
+        "-v", f"{to_docker_host_path(recipe_dir)}:/recipe:ro",
+        "-v", f"{to_docker_host_path(source_cache)}:/src_cache:ro",
+        "-v", f"{to_docker_host_path(out_dir)}:/out",
         image_tag,
         "bash", "-c",
         f"""
@@ -333,9 +364,9 @@ def cmd_build(args, config: Dict[str, Any]):
     # 2. Fuzzers
     fuzzers_to_build = []
     if args.fuzzer:
-        fuzzers_to_build = [f for f in config['fuzzers'] if f['id'] == args.fuzzer]
+        fuzzers_to_build = [f for f in config['fuzzers'] if f['id'] == args.fuzzer and f.get('enabled', True)]
     elif args.all:
-        fuzzers_to_build = config['fuzzers']
+        fuzzers_to_build = [f for f in config['fuzzers'] if f.get('enabled', True)]
 
     branch = getattr(args, 'branch', 'develop') or 'develop'
     for f in fuzzers_to_build:
@@ -348,7 +379,7 @@ def cmd_build(args, config: Dict[str, Any]):
     elif args.all or (not args.base and not args.fuzzer):
         targets_to_build = [t for t in config['targets'] if t.get('enabled', True)]
 
-    active_fuzzers = [f for f in config['fuzzers'] if (args.fuzzer is None or f['id'] == args.fuzzer)]
+    active_fuzzers = [f for f in config['fuzzers'] if (args.fuzzer is None or f['id'] == args.fuzzer) and f.get('enabled', True)]
 
     for t in targets_to_build:
         for f in active_fuzzers:
@@ -425,8 +456,8 @@ def triage_crash(target_bin: str, target_args: str, crash_path: Path, target_loc
 
     cmd = [
         "docker", "run", "--rm",
-        "-v", f"{str(crash_path.parent).replace(os.sep, '/')}:/crash_dir:ro",
-        "-v", f"{str(Path(target_bin).parent).replace(os.sep, '/')}:/bin_dir:ro",
+        "-v", f"{to_docker_host_path(crash_path.parent)}:/crash_dir:ro",
+        "-v", f"{to_docker_host_path(Path(target_bin).parent)}:/bin_dir:ro",
         "-e", "ASAN_OPTIONS=abort_on_error=1:symbolize=1:detect_leaks=0:use_sigaltstack=0",
         image_tag,
         "bash", "-c", run_cmd
@@ -441,8 +472,8 @@ def triage_crash(target_bin: str, target_args: str, crash_path: Path, target_loc
     if not matched and res.returncode != 0:
         gdb_cmd = [
             "docker", "run", "--rm",
-            "-v", f"{str(crash_path.parent).replace(os.sep, '/')}:/crash_dir:ro",
-            "-v", f"{str(Path(target_bin).parent).replace(os.sep, '/')}:/bin_dir:ro",
+            "-v", f"{to_docker_host_path(crash_path.parent)}:/crash_dir:ro",
+            "-v", f"{to_docker_host_path(Path(target_bin).parent)}:/bin_dir:ro",
             image_tag,
             "bash", "-c", f"gdb -batch -ex \"{gdb_run}\" -ex \"bt\" /bin_dir/{Path(target_bin).name}"
         ]
@@ -512,8 +543,8 @@ for fname in file_names:
 """
     cmd = [
         "docker", "run", "--rm",
-        "-v", f"{str(queue_dir).replace(os.sep, '/')}:/queue_dir:ro",
-        "-v", f"{str(Path(target_bin).parent).replace(os.sep, '/')}:/bin_dir:ro",
+        "-v", f"{to_docker_host_path(queue_dir)}:/queue_dir:ro",
+        "-v", f"{to_docker_host_path(Path(target_bin).parent)}:/bin_dir:ro",
         image_tag,
         "python3", "-c", runner_script
     ]
@@ -610,9 +641,9 @@ def run_single_trial(fuzzer: Dict[str, Any], target: Dict[str, Any], trial_idx: 
                 fpath.touch()
 
     docker_run_cmd.extend([
-        "-v", f"{str(bin_dir).replace(os.sep, '/')}:/target:ro",
-        "-v", f"{str(in_dir).replace(os.sep, '/')}:/in:ro",
-        "-v", f"{str(out_dir).replace(os.sep, '/')}:/out",
+        "-v", f"{to_docker_host_path(bin_dir)}:/target:ro",
+        "-v", f"{to_docker_host_path(in_dir)}:/in:ro",
+        "-v", f"{to_docker_host_path(out_dir)}:/out",
         image_tag,
         "bash", "-c", afl_cmd
     ])
@@ -740,7 +771,7 @@ def cmd_run(args, config: Dict[str, Any]):
         targets = [t for t in config['targets'] if t['id'] == args.target]
     else:
         targets = [t for t in config['targets'] if t.get('enabled', True)]
-    fuzzers = [f for f in config['fuzzers'] if (args.fuzzer is None or f['id'] == args.fuzzer)]
+    fuzzers = [f for f in config['fuzzers'] if (args.fuzzer is None or f['id'] == args.fuzzer) and f.get('enabled', True)]
 
     print(f"[*] Configuration: Duration={duration_str} ({duration_sec}s), Trials={trials}, Workers={max_workers}")
     print(f"[*] Targets: {[t['id'] for t in targets]}")

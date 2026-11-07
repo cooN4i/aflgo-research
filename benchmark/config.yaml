@@ -13,11 +13,11 @@ benchmark:
 resources:
   cpu_per_trial: 1           # Pin exactly 1 CPU core per fuzzer instance
   memory_limit: "2g"         # Max RAM per container to prevent system freeze
-  max_parallel_workers: 5    # Adjust according to available host CPU cores
+  max_parallel_workers: 8    # Adjust according to available host CPU cores
 
 experiment:
-  duration: "12h"            # Fuzzing campaign duration per trial (12h as requested)
-  trials: 10                 # Number of repetitions per (fuzzer, target) pair (10 trials)
+  duration: "24h"            # Fuzzing campaign duration per trial (12h as requested)
+  trials: 1                  # Number of repetitions per (fuzzer, target) pair (10 trials)
   metric_poll_interval: 30   # Status and metric polling interval (seconds)
 
 # ------------------------------------------------------------------------------
@@ -71,30 +71,35 @@ fuzzers:
     path: "fuzzers/aflgo_mod"
     type: "distance_based"
     baseline: false
+    enabled: true
 
   - id: "aflgo_orig"
     name: "AFLGo (Vanilla)"
     path: "fuzzers/aflgo_orig"
     type: "distance_based"
     baseline: true
+    enabled: false
 
   - id: "dafl"
     name: "DAFL (Selectivity & Score-based DGF)"
     path: "fuzzers/dafl"
     type: "selectivity_based"
     baseline: false
+    enabled: false
 
   - id: "fishfuzz"
     name: "FishFuzz (Multi-distance & Dynamic Target Ranking)"
     path: "fuzzers/fishfuzz"
     type: "multi_distance"
     baseline: false
+    enabled: false
 
   - id: "windranger"
     name: "WindRanger (Deviation Basic Blocks DGF)"
     path: "fuzzers/windranger"
     type: "deviation_based"
     baseline: false
+    enabled: false
 
 # ------------------------------------------------------------------------------
 # Benchmark Targets (5 Rigorous Verified Targets from DAFL / FSE'24)
