@@ -247,6 +247,12 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
     out_dir = (BINARIES_DIR / fuzzer_id / target_id).resolve()
     safe_mkdir(out_dir)
 
+    # Check if target binary already exists to avoid redundant recompilation
+    candidates = [c for c in out_dir.glob(f"{target_id}*") if c.is_file() and c.stat().st_size > 0]
+    if candidates:
+        print(f"[+] Binary for target '{target_id}' with fuzzer '{fuzzer_id}' already exists -> {candidates[0]} (skipping build).")
+        return True
+
     # Clone source to cache if not present
     safe_mkdir(CACHE_DIR)
     source_cache = clone_target_source(target_info, CACHE_DIR)
@@ -355,27 +361,171 @@ def cmd_build(args, config: Dict[str, Any]):
 # ==============================================================================
 # Command: run (Execution & Real-time Crash Triage)
 # ==============================================================================
+def is_target_in_stack_frames(stack_trace: str, target_loc: str, max_depth: int = 5) -> bool:
+    """
+    Parses ASan and GDB stack traces frame-by-frame and checks
+    if target file and line match accurately in the top `max_depth` stack frames.
+    Prevents false positives from line numbers in addresses or unrelated callers.
+    """
+    if not target_loc or not stack_trace:
+        return False
+
+    if ":" in target_loc:
+        t_file_part, t_line_part = target_loc.split(":", 1)
+        target_file = Path(t_file_part.strip()).name
+        try:
+            target_line = int(t_line_part.strip())
+        except ValueError:
+            target_line = None
+    else:
+        target_file = Path(target_loc.strip()).name
+        target_line = None
+
+    frame_patterns = [
+        # GDB frame format: #0  0x... in func (...) at /path/to/file.c:4319
+        re.compile(r'^\s*#(?P<frame>\d+)\s+.*?\bat\s+(?P<file>[^\s:]+):(?P<line>\d+)'),
+        # ASan frame format: #0 0x... in func /path/to/file.c:4319:12 or :4319
+        re.compile(r'^\s*#(?P<frame>\d+)\s+0x[0-9a-fA-F]+\s+(?:in\s+\S+\s+)?(?:\(|at\s+)?(?P<file>[^\s\(\):]+):(?P<line>\d+)(?::\d+)?'),
+        # Generic frame format: #0 ... file.c:123
+        re.compile(r'^\s*#(?P<frame>\d+)\s+.*?(?:\s|\()(?P<file>[a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9_\-]+):(?P<line>\d+)'),
+    ]
+
+    for line in stack_trace.splitlines():
+        line = line.strip()
+        if not line.startswith("#"):
+            continue
+        for pat in frame_patterns:
+            m = pat.match(line)
+            if m:
+                frame_idx = int(m.group("frame"))
+                if frame_idx >= max_depth:
+                    break
+                f_name = Path(m.group("file")).name
+                f_line = int(m.group("line"))
+                if f_name == target_file:
+                    if target_line is None or f_line == target_line:
+                        return True
+                break
+
+    return False
+
+
 def triage_crash(target_bin: str, target_args: str, crash_path: Path, target_loc: str, image_tag: str) -> Tuple[bool, str]:
     """
-    Runs the crashing input inside a container with ASan enabled and checks
-    if the target bug line appears in the stack trace.
+    Runs the crashing input inside a container and checks
+    if the target bug line appears in the top stack frames (via ASan or GDB).
     """
+    crash_file = f"/crash_dir/{crash_path.name}"
+    if "@@" in target_args:
+        run_cmd = f"/bin_dir/{Path(target_bin).name} {target_args.replace('@@', crash_file)}"
+        gdb_run = f"r {target_args.replace('@@', crash_file)}"
+    else:
+        run_cmd = f"/bin_dir/{Path(target_bin).name} {target_args} < {crash_file}"
+        gdb_run = f"r {target_args} < {crash_file}"
+
     cmd = [
         "docker", "run", "--rm",
         "-v", f"{str(crash_path.parent).replace(os.sep, '/')}:/crash_dir:ro",
         "-v", f"{str(Path(target_bin).parent).replace(os.sep, '/')}:/bin_dir:ro",
         "-e", "ASAN_OPTIONS=abort_on_error=1:symbolize=1:detect_leaks=0:use_sigaltstack=0",
         image_tag,
-        "bash", "-c",
-        f"/bin_dir/{Path(target_bin).name} {target_args.replace('@@', f'/crash_dir/{crash_path.name}')}"
+        "bash", "-c", run_cmd
     ]
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace")
     stack_trace = res.stderr + "\n" + res.stdout
-    target_file, target_line = target_loc.split(":") if ":" in target_loc else (target_loc, "")
 
-    # Verification: check if target file and line appear in ASan report
-    matched = (target_file in stack_trace) and (target_line in stack_trace if target_line else True)
+    # Verification: check if target file and line match accurately in top stack frames
+    matched = is_target_in_stack_frames(stack_trace, target_loc, max_depth=5)
+
+    # If not matched directly, run with GDB to capture backtrace on native SIGSEGV
+    if not matched and res.returncode != 0:
+        gdb_cmd = [
+            "docker", "run", "--rm",
+            "-v", f"{str(crash_path.parent).replace(os.sep, '/')}:/crash_dir:ro",
+            "-v", f"{str(Path(target_bin).parent).replace(os.sep, '/')}:/bin_dir:ro",
+            image_tag,
+            "bash", "-c", f"gdb -batch -ex \"{gdb_run}\" -ex \"bt\" /bin_dir/{Path(target_bin).name}"
+        ]
+        gdb_res = subprocess.run(gdb_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace")
+        gdb_trace = gdb_res.stdout + "\n" + gdb_res.stderr
+        if is_target_in_stack_frames(gdb_trace, target_loc, max_depth=5):
+            matched = True
+            stack_trace = gdb_trace
+
     return matched, stack_trace
+
+
+def check_inputs_reach_batch(target_bin: str, target_args: str, input_paths: List[Path], target_loc: str, image_tag: str) -> Optional[Tuple[str, Path]]:
+    """
+    Checks a batch of input files inside a single container execution.
+    Returns (hit_filename, hit_path) if any input executes target_loc (via GDB breakpoint), else None.
+    """
+    if not input_paths or not target_loc:
+        return None
+
+    queue_dir = input_paths[0].parent
+    file_names = [p.name for p in input_paths]
+
+    if ":" in target_loc:
+        t_file = Path(target_loc.split(":", 1)[0].strip()).name
+        try:
+            t_line = int(target_loc.split(":", 1)[1].strip())
+        except ValueError:
+            t_line = None
+    else:
+        t_file = Path(target_loc.strip()).name
+        t_line = None
+
+    runner_script = f"""
+import subprocess, sys, re, os
+from pathlib import Path
+
+target_bin = '/bin_dir/{Path(target_bin).name}'
+target_loc = '{target_loc}'
+target_file = '{t_file}'
+target_line = {t_line if t_line is not None else 'None'}
+target_args = '{target_args}'
+file_names = {json.dumps(file_names)}
+
+hit_pat = re.compile(r'Breakpoint\\s+\\d+,\\s+.*?\\bat\\s+(?P<file>[^\\s:]+):(?P<line>\\d+)')
+
+for fname in file_names:
+    fpath = f'/queue_dir/{{fname}}'
+    if '@@' in target_args:
+        gdb_run = f'r {{target_args.replace("@@", fpath)}}'
+    else:
+        gdb_run = f'r {{target_args}} < {{fpath}}'
+
+    cmd = ['gdb', '-batch', '-ex', f'b {{target_loc}}', '-ex', gdb_run, target_bin]
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors='replace')
+    out = res.stdout + '\\n' + res.stderr
+
+    for line in out.splitlines():
+        m = hit_pat.search(line)
+        if m:
+            fname_matched = Path(m.group('file')).name
+            fline_matched = int(m.group('line'))
+            if fname_matched == target_file:
+                if target_line is None or fline_matched == target_line:
+                    print(f'TARGET_REACH_HIT:{{fname}}')
+                    sys.exit(0)
+"""
+    cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{str(queue_dir).replace(os.sep, '/')}:/queue_dir:ro",
+        "-v", f"{str(Path(target_bin).parent).replace(os.sep, '/')}:/bin_dir:ro",
+        image_tag,
+        "python3", "-c", runner_script
+    ]
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace")
+    for line in res.stdout.splitlines():
+        if line.startswith("TARGET_REACH_HIT:"):
+            hit_name = line.split(":", 1)[1].strip()
+            for p in input_paths:
+                if p.name == hit_name:
+                    return hit_name, p
+
+    return None
 
 
 def run_single_trial(fuzzer: Dict[str, Any], target: Dict[str, Any], trial_idx: int,
@@ -406,6 +556,11 @@ def run_single_trial(fuzzer: Dict[str, Any], target: Dict[str, Any], trial_idx: 
     run_dir = (RUNS_DIR / fuzzer_id / target_id / f"trial_{trial_idx}").resolve()
     in_dir = run_dir / "in"
     out_dir = run_dir / "out"
+
+    # Reset out_dir to ensure AFL starts cleanly without 'at-risk data found in /out'
+    if out_dir.exists():
+        shutil.rmtree(out_dir, ignore_errors=True)
+
     run_dir.mkdir(parents=True, exist_ok=True)
     in_dir.mkdir(exist_ok=True)
     out_dir.mkdir(exist_ok=True)
@@ -468,13 +623,21 @@ def run_single_trial(fuzzer: Dict[str, Any], target: Dict[str, Any], trial_idx: 
     start_time = time.time()
     poll_interval = config['experiment'].get('metric_poll_interval', 30)
     seen_crashes = set()
+    seen_queue = set()
     result = {
         "fuzzer": fuzzer_id,
         "target": target_id,
         "trial": trial_idx,
         "status": "TIMEOUT",
-        "ttt": None,
-        "ett": None,
+        "reached": False,
+        "ttt": None,          # Time-to-Target (T_reach, seconds)
+        "ett": None,          # Executions-to-Target (E_reach)
+        "reach_file": None,
+        "triggered": False,
+        "tte": None,          # Time-to-Exposure (T_trigger, seconds)
+        "ete": None,          # Executions-to-Exposure (E_trigger)
+        "crash_file": None,
+        "stack_trace": None,
         "total_execs": 0,
         "wall_time": duration_sec,
     }
@@ -485,29 +648,61 @@ def run_single_trial(fuzzer: Dict[str, Any], target: Dict[str, Any], trial_idx: 
             if elapsed >= duration_sec:
                 break
 
-            # Check crashes directory
+            # 1. Check reachability (TTT / T_reach) on new queue files if target not yet reached
+            queue_dir = out_dir / "queue"
+            if not result["reached"] and queue_dir.exists():
+                new_queue = [f for f in sorted(queue_dir.glob("id:*")) if f.name not in seen_queue]
+                for f in new_queue:
+                    seen_queue.add(f.name)
+                if new_queue:
+                    hit = check_inputs_reach_batch(target_bin, target_args, new_queue, target_loc, image_tag)
+                    if hit:
+                        hit_name, hit_path = hit
+                        result["reached"] = True
+                        result["ttt"] = round(elapsed, 2)
+                        result["reach_file"] = hit_name
+                        stats_file = out_dir / "fuzzer_stats"
+                        if stats_file.exists():
+                            for line in stats_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                                if line.startswith("execs_done"):
+                                    result["ett"] = int(line.split(":")[1].strip())
+                        print(f"\n[+] >>> TARGET REACHED (TTT)! [{fuzzer_id} on {target_id} Trial {trial_idx}] <<<")
+                        print(f"    Time-to-Target (TTT / T_reach): {result['ttt']}s | Execs: {result['ett']}\n")
+
+            # 2. Check vulnerability exposure (TTE / T_trigger) on new crash files
             crashes_dir = out_dir / "crashes"
             if crashes_dir.exists():
                 for c in crashes_dir.iterdir():
                     if c.name.startswith("id:") and c.name not in seen_crashes:
                         seen_crashes.add(c.name)
-                        # Verify crash with ASan
+                        # Verify crash with ASan or GDB
                         matched, trace = triage_crash(target_bin, target_args, c, target_loc, image_tag)
                         if matched:
                             # Target vulnerability reached and triggered!
                             result["status"] = "SUCCESS"
-                            result["ttt"] = round(elapsed, 2)
+                            result["triggered"] = True
+                            result["tte"] = round(elapsed, 2)
                             result["crash_file"] = c.name
                             result["stack_trace"] = trace[:1000]
+
+                            # If target reach was not marked yet, crash also marks first reach
+                            if not result["reached"]:
+                                result["reached"] = True
+                                result["ttt"] = result["tte"]
+                                result["reach_file"] = c.name
 
                             # Read execs from fuzzer_stats
                             stats_file = out_dir / "fuzzer_stats"
                             if stats_file.exists():
-                                for line in stats_file.read_text().splitlines():
+                                for line in stats_file.read_text(encoding="utf-8", errors="replace").splitlines():
                                     if line.startswith("execs_done"):
-                                        result["ett"] = int(line.split(":")[1].strip())
-                            print(f"\n[+] >>> BUG TRIGGERED! [{fuzzer_id} on {target_id} Trial {trial_idx}] <<<")
-                            print(f"    Time-to-Target (TTT): {result['ttt']}s | Execs: {result['ett']}\n")
+                                        cur_execs = int(line.split(":")[1].strip())
+                                        result["ete"] = cur_execs
+                                        if result["ett"] is None:
+                                            result["ett"] = cur_execs
+                            print(f"\n[+] >>> BUG TRIGGERED (TTE)! [{fuzzer_id} on {target_id} Trial {trial_idx}] <<<")
+                            print(f"    Reachability (TTT):     {result['ttt']}s | Execs: {result['ett']}")
+                            print(f"    Exposure (TTE):         {result['tte']}s | Execs: {result['ete']}\n")
                             break
 
             if result["status"] == "SUCCESS":
@@ -523,7 +718,7 @@ def run_single_trial(fuzzer: Dict[str, Any], target: Dict[str, Any], trial_idx: 
         # Parse final execs
         stats_file = out_dir / "fuzzer_stats"
         if stats_file.exists():
-            for line in stats_file.read_text().splitlines():
+            for line in stats_file.read_text(encoding="utf-8", errors="replace").splitlines():
                 if line.startswith("execs_done"):
                     result["total_execs"] = int(line.split(":")[1].strip())
 
@@ -555,9 +750,9 @@ def cmd_run(args, config: Dict[str, Any]):
     cpu_core = 0
     available_cores = os.cpu_count() or 4
 
-    for t in targets:
-        for f in fuzzers:
-            for trial_idx in range(1, trials + 1):
+    for trial_idx in range(1, trials + 1):
+        for t in targets:
+            for f in fuzzers:
                 assigned_core = cpu_core % available_cores
                 cpu_core += 1
                 tasks.append((f, t, trial_idx, duration_sec, assigned_core, config))
@@ -647,35 +842,45 @@ def cmd_analyze(args, config: Dict[str, Any]):
     report_lines = [
         "# DGF Benchmark: Statistical Evaluation & Experimental Report",
         f"\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "\n## 1. Executive Summary & Raw Metrics Across All Fuzzers\n",
-        "| Target | Fuzzer | Role | Trials | Success Rate | Median TTT (s) | IQR TTT | Median ETT |",
-        "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |"
+        "\n## 1. Executive Summary & Raw Metrics Across All Fuzzers (Reachability TTT vs. Exposure TTE)\n",
+        "| Target | Fuzzer | Role | Trials | Reach Rate | Med TTT (s) | IQR TTT | Med ETT | Trigger Rate | Med TTE (s) | IQR TTE | Med ETE |",
+        "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |"
     ]
 
     for target, fuzzers in data.items():
         for fuzzer, trials in fuzzers.items():
             n_trials = len(trials)
-            successes = [t for t in trials if t['status'] == "SUCCESS"]
-            success_rate = (len(successes) / n_trials * 100) if n_trials > 0 else 0
-
-            ttts = [t['ttt'] for t in successes]
-            etts = [t['ett'] for t in successes if t.get('ett') is not None]
-
+            
+            # Reachability metrics (TTT / T_reach)
+            reached = [t for t in trials if t.get('reached', False) or t.get('ttt') is not None]
+            reach_rate = (len(reached) / n_trials * 100) if n_trials > 0 else 0
+            ttts = [t['ttt'] for t in reached if t.get('ttt') is not None]
+            etts = [t['ett'] for t in reached if t.get('ett') is not None]
             med_ttt = f"{np.median(ttts):.1f}" if ttts else "N/A"
             iqr_ttt = f"{np.percentile(ttts, 75) - np.percentile(ttts, 25):.1f}" if len(ttts) >= 2 else "N/A"
             med_ett = f"{int(np.median(etts)):,}" if etts else "N/A"
+
+            # Exposure / Bug trigger metrics (TTE / T_trigger)
+            triggered = [t for t in trials if t.get('triggered', False) or t.get('status') == "SUCCESS"]
+            trigger_rate = (len(triggered) / n_trials * 100) if n_trials > 0 else 0
+            ttes = [t.get('tte', t.get('ttt')) for t in triggered if (t.get('tte') is not None or t.get('ttt') is not None)]
+            etes = [t.get('ete', t.get('ett')) for t in triggered if (t.get('ete') is not None or t.get('ett') is not None)]
+            med_tte = f"{np.median(ttes):.1f}" if ttes else "N/A"
+            iqr_tte = f"{np.percentile(ttes, 75) - np.percentile(ttes, 25):.1f}" if len(ttes) >= 2 else "N/A"
+            med_ete = f"{int(np.median(etes)):,}" if etes else "N/A"
+
             role = "Proposed (Ours)" if fuzzer == "aflgo_mod" else ("Vanilla Baseline" if fuzzer == "aflgo_orig" else "SotA Competitor")
 
             report_lines.append(
-                f"| `{target}` | `{fuzzer}` | {role} | {n_trials} | **{success_rate:.1f}%** | {med_ttt} | {iqr_ttt} | {med_ett} |"
+                f"| `{target}` | `{fuzzer}` | {role} | {n_trials} | **{reach_rate:.1f}%** | {med_ttt} | {iqr_ttt} | {med_ett} | **{trigger_rate:.1f}%** | {med_tte} | {iqr_tte} | {med_ete} |"
             )
 
     report_lines.append("\n## 2. Comparative Evaluation: Proposed `aflgo_mod` vs. All Competitors\n")
     report_lines.append(
-        "| Target | Compared Baseline | Baseline Role | Speedup Factor | Mann-Whitney $p$ | Vargha-Delaney $\\hat{A}_{12}$ | Statistical Significance |"
+        "| Target | Compared Baseline | Baseline Role | Reach Speedup (TTT) | Trigger Speedup (TTE) | Mann-Whitney $p$ (TTE) | Vargha-Delaney $\\hat{A}_{12}$ | Statistical Significance |"
     )
     report_lines.append(
-        "| :--- | :--- | :--- | :---: | :---: | :---: | :--- |"
+        "| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- |"
     )
 
     preferred_order = ["aflgo_orig", "dafl", "fishfuzz", "windranger"]
@@ -686,25 +891,27 @@ def cmd_analyze(args, config: Dict[str, Any]):
             continue
 
         mod_trials = fuzzers["aflgo_mod"]
-        mod_ttts = [t['ttt'] if t['status'] == "SUCCESS" else t['wall_time'] * 2 for t in mod_trials]
-        mod_successes = [t for t in mod_trials if t['status'] == "SUCCESS"]
-        mod_med = np.median([t['ttt'] for t in mod_successes]) if mod_successes else None
+        mod_reached = [t for t in mod_trials if t.get('reached', False) or t.get('ttt') is not None]
+        mod_triggered = [t for t in mod_trials if t.get('triggered', False) or t.get('status') == "SUCCESS"]
+        mod_med_ttt = np.median([t['ttt'] for t in mod_reached if t.get('ttt') is not None]) if mod_reached else None
+        mod_med_tte = np.median([t.get('tte', t.get('ttt')) for t in mod_triggered if (t.get('tte') is not None or t.get('ttt') is not None)]) if mod_triggered else None
+        mod_ttes_for_mw = [t.get('tte', t.get('ttt')) if (t.get('triggered', False) or t.get('status') == "SUCCESS") else t['wall_time'] * 2 for t in mod_trials]
 
         competitors = [f for f in fuzzers.keys() if f != "aflgo_mod"]
         competitors.sort(key=lambda x: preferred_order.index(x) if x in preferred_order else 99)
 
         for comp in competitors:
             comp_trials = fuzzers[comp]
-            comp_ttts = [t['ttt'] if t['status'] == "SUCCESS" else t['wall_time'] * 2 for t in comp_trials]
-            comp_successes = [t for t in comp_trials if t['status'] == "SUCCESS"]
-            comp_med = np.median([t['ttt'] for t in comp_successes]) if comp_successes else None
+            comp_reached = [t for t in comp_trials if t.get('reached', False) or t.get('ttt') is not None]
+            comp_triggered = [t for t in comp_trials if t.get('triggered', False) or t.get('status') == "SUCCESS"]
+            comp_med_ttt = np.median([t['ttt'] for t in comp_reached if t.get('ttt') is not None]) if comp_reached else None
+            comp_med_tte = np.median([t.get('tte', t.get('ttt')) for t in comp_triggered if (t.get('tte') is not None or t.get('ttt') is not None)]) if comp_triggered else None
+            comp_ttes_for_mw = [t.get('tte', t.get('ttt')) if (t.get('triggered', False) or t.get('status') == "SUCCESS") else t['wall_time'] * 2 for t in comp_trials]
 
-            p_val, a12 = calculate_mann_whitney_and_a12(mod_ttts, comp_ttts)
+            p_val, a12 = calculate_mann_whitney_and_a12(mod_ttes_for_mw, comp_ttes_for_mw)
 
-            if mod_med and comp_med and mod_med > 0:
-                speedup = f"{comp_med / mod_med:.2f}x"
-            else:
-                speedup = "N/A"
+            reach_speedup = f"{comp_med_ttt / mod_med_ttt:.2f}x" if (mod_med_ttt and comp_med_ttt and mod_med_ttt > 0) else "N/A"
+            trigger_speedup = f"{comp_med_tte / mod_med_tte:.2f}x" if (mod_med_tte and comp_med_tte and mod_med_tte > 0) else "N/A"
 
             if comp == "aflgo_orig":
                 role = "Direct Ancestor (Ablation)"
@@ -726,7 +933,7 @@ def cmd_analyze(args, config: Dict[str, Any]):
                 sig_verdict += " (Equivalent)"
 
             report_lines.append(
-                f"| `{target}` | `{comp}` | {role} | **{speedup}** | {p_val:.4f} | **{a12:.3f}** | {sig_verdict} |"
+                f"| `{target}` | `{comp}` | {role} | **{reach_speedup}** | **{trigger_speedup}** | {p_val:.4f} | **{a12:.3f}** | {sig_verdict} |"
             )
 
     report_content = "\n".join(report_lines)

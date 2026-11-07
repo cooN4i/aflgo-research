@@ -20,4 +20,3 @@ fuzzing:
   target_args: "-g @@"
   input_type: "file"
   seed_dir: "seeds"
-  dictionary: "elf.dict"

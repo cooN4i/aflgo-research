@@ -17,7 +17,7 @@ resources:
 
 experiment:
   duration: "1h"            # Fuzzing campaign duration per trial (e.g. 8h, 12h, 24h)
-  trials: 1                  # Number of repetitions per (fuzzer, target) pair
+  trials: 5                  # Number of repetitions per (fuzzer, target) pair
   metric_poll_interval: 30   # Status and metric polling interval (seconds)
 
 # ------------------------------------------------------------------------------
@@ -25,17 +25,32 @@ experiment:
 # ------------------------------------------------------------------------------
 metrics:
   - id: "time_to_target"
-    name: "Time-To-Target (TTT / TTE)"
-    description: "Wall-clock seconds to first target reach (T_reach) and first bug trigger (T_trigger)"
+    name: "Time-To-Target (TTT / T_reach)"
+    description: "Wall-clock seconds to first target reach (T_reach) verified by GDB breakpoint"
     aggregation: ["median", "iqr"]
 
   - id: "execs_to_target"
-    name: "Executions-To-Target (ETT)"
+    name: "Executions-To-Target (ETT / E_reach)"
+    description: "Number of test executions performed before first target reach"
+    aggregation: ["median", "iqr"]
+
+  - id: "time_to_exposure"
+    name: "Time-To-Exposure (TTE / T_trigger)"
+    description: "Wall-clock seconds to first target bug trigger/crash (T_trigger) verified by ASan/GDB"
+    aggregation: ["median", "iqr"]
+
+  - id: "execs_to_exposure"
+    name: "Executions-To-Exposure (ETE / E_trigger)"
     description: "Number of test executions performed before triggering target bug"
     aggregation: ["median", "iqr"]
 
-  - id: "success_rate"
-    name: "Success Rate"
+  - id: "reach_rate"
+    name: "Reach Rate"
+    description: "Fraction of trials that successfully reached the target basic block within timeout"
+    unit: "percentage"
+
+  - id: "trigger_rate"
+    name: "Trigger Rate"
     description: "Fraction of trials that successfully triggered the bug within timeout"
     unit: "percentage"
 
@@ -44,7 +59,7 @@ metrics:
     description: "Evolution of minimum and average distance d_min(t) over time"
 
   - id: "statistical_significance"
-    name: "Mann-Whitney U Test"
+    name: "Mann-Whitney U Test & Vargha-Delaney A12"
     description: "Two-sided p-value and Vargha-Delaney A12 effect size against baseline"
 
 # ------------------------------------------------------------------------------
@@ -85,6 +100,11 @@ fuzzers:
 # Benchmark Targets (All from bikini/exploitarium)
 # ------------------------------------------------------------------------------
 targets:
+  - id: "cxxfilt"
+    name: "GNU Binutils cxxfilt (CVE-2016-4487 UAF)"
+    path: "targets/cxxfilt"
+    enabled: true
+
   - id: "objdump_dlx"
     name: "GNU Binutils objdump (DLX ELF OOB Write)"
     exploitarium_dir: "objdump-dlx-calc-poc"

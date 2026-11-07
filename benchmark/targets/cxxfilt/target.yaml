@@ -1,0 +1,21 @@
+target:
+  id: "cxxfilt"
+  name: "GNU Binutils cxxfilt (CVE-2016-4487)"
+  repo_url: "https://sourceware.org/git/binutils-gdb.git"
+  commit: "2c49145108878e9914173cd9c3aa36ab0cede6b3"
+  vulnerability:
+    type: "Invalid Free / Use-After-Free"
+    reference: "CVE-2016-4487 (GCC Bugzilla 70481)"
+    target_file: "cplus-dem.c"
+    target_line: "cplus-dem.c:4319"
+
+build:
+  configure_cmd: "./configure --disable-werror --disable-shared --disable-gdb --disable-libdecnumber --disable-readline --disable-sim"
+  make_cmd: "make -j$(nproc) all-binutils"
+  binary_path: "binutils/cxxfilt"
+  sanitizer_flags: ""
+
+fuzzing:
+  target_args: ""
+  input_type: "stdin"
+  seed_dir: "seeds"
