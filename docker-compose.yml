@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  benchmark-runner:
+    build:
+      context: ./benchmark
+      dockerfile: docker/orchestrator/Dockerfile
+    container_name: dgf-benchmark-orchestrator
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./benchmark:/benchmark
+    environment:
+      - PYTHONUNBUFFERED=1
+    network_mode: host
+

@@ -1,0 +1,22 @@
+target:
+  id: "objdump_8397"
+  name: "GNU Binutils objdump (CVE-2017-8397 BOF)"
+  repo_url: "https://sourceware.org/git/binutils-gdb.git"
+  commit: "7fa393306ed8b93019d225548474c0540b8928f7"
+  vulnerability:
+    type: "Heap Buffer Overflow"
+    reference: "CVE-2017-8397"
+    target_file: "reloc.c"
+    target_line: "reloc.c:885"
+
+build:
+  configure_cmd: "./configure --disable-werror --disable-shared --disable-gdb --disable-libdecnumber --disable-readline --disable-sim --disable-nls"
+  make_cmd: "make -j$(nproc) all-binutils"
+  binary_path: "binutils/objdump"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "-W @@"
+  input_type: "file"
+  seed_dir: "seeds"
+

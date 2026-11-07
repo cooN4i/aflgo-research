@@ -3,8 +3,8 @@
 # ==============================================================================
 
 benchmark:
-  name: "DGF-Exploitarium-Benchmark"
-  version: "1.0.0"
+  name: "DGF-Benchmark"
+  version: "1.1.0"
   description: "Comparative benchmark for Directed Greybox Fuzzers on real-world vulnerabilities"
 
 # ------------------------------------------------------------------------------
@@ -16,8 +16,8 @@ resources:
   max_parallel_workers: 5    # Adjust according to available host CPU cores
 
 experiment:
-  duration: "1h"            # Fuzzing campaign duration per trial (e.g. 8h, 12h, 24h)
-  trials: 5                  # Number of repetitions per (fuzzer, target) pair
+  duration: "12h"            # Fuzzing campaign duration per trial (12h as requested)
+  trials: 10                 # Number of repetitions per (fuzzer, target) pair (10 trials)
   metric_poll_interval: 30   # Status and metric polling interval (seconds)
 
 # ------------------------------------------------------------------------------
@@ -66,17 +66,17 @@ metrics:
 # Competing Fuzzers
 # ------------------------------------------------------------------------------
 fuzzers:
-  - id: "aflgo_orig"
-    name: "AFLGo (Vanilla)"
-    path: "fuzzers/aflgo_orig"
-    type: "distance_based"
-    baseline: true
-
   - id: "aflgo_mod"
     name: "AFLGo (Modified: Complexity & Dominators)"
     path: "fuzzers/aflgo_mod"
     type: "distance_based"
     baseline: false
+
+  - id: "aflgo_orig"
+    name: "AFLGo (Vanilla)"
+    path: "fuzzers/aflgo_orig"
+    type: "distance_based"
+    baseline: true
 
   - id: "dafl"
     name: "DAFL (Selectivity & Score-based DGF)"
@@ -97,40 +97,30 @@ fuzzers:
     baseline: false
 
 # ------------------------------------------------------------------------------
-# Benchmark Targets (All from bikini/exploitarium)
+# Benchmark Targets (5 Rigorous Verified Targets from DAFL / FSE'24)
 # ------------------------------------------------------------------------------
 targets:
   - id: "cxxfilt"
-    name: "GNU Binutils cxxfilt (CVE-2016-4487 UAF)"
+    name: "GNU Binutils cxxfilt (CVE-2016-4487 Demangle UAF)"
     path: "targets/cxxfilt"
     enabled: true
 
-  - id: "objdump_dlx"
-    name: "GNU Binutils objdump (DLX ELF OOB Write)"
-    exploitarium_dir: "objdump-dlx-calc-poc"
-    path: "targets/objdump_dlx"
-    enabled: false
+  - id: "swftophp_20427"
+    name: "Ming swftophp (CVE-2018-20427 Flash Action Null Deref)"
+    path: "targets/swftophp_20427"
+    enabled: true
 
-  - id: "ffmpeg_rasc"
-    name: "FFmpeg RASC Decoder (decode_dlta OOB Write)"
-    exploitarium_dir: "ffmpeg-rasc-dlta-calc-poc"
-    path: "targets/ffmpeg_rasc"
-    enabled: false
+  - id: "swftophp_12982"
+    name: "Ming swftophp (CVE-2019-12982 Decompile Heap BOF)"
+    path: "targets/swftophp_12982"
+    enabled: true
 
-  - id: "vlc_vp9"
-    name: "FFmpeg/VLC VP9 Decoder (Slice-Thread Overwrite)"
-    exploitarium_dir: "vlc-vp9-reschange-crash-poc"
-    path: "targets/vlc_vp9"
-    enabled: false
+  - id: "objdump_8397"
+    name: "GNU Binutils objdump (CVE-2017-8397 DWARF Reloc BOF)"
+    path: "targets/objdump_8397"
+    enabled: true
 
-  - id: "cares_tcp"
-    name: "c-ares DNS Library (ares_getaddrinfo UAF)"
-    exploitarium_dir: "c-ares-tcp-uaf-calc-poc"
-    path: "targets/cares_tcp"
-    enabled: false
-
-  - id: "libssh2_packet"
-    name: "libssh2 (packet_length Integer Wrap)"
-    exploitarium_dir: "libssh2-cve-2026-55200-poc"
-    path: "targets/libssh2_packet"
-    enabled: false
+  - id: "nm_14940"
+    name: "GNU Binutils nm (CVE-2017-14940 ELF Version OOM/BOF)"
+    path: "targets/nm_14940"
+    enabled: true
