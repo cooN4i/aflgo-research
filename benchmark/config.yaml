@@ -102,30 +102,30 @@ fuzzers:
     enabled: false
 
 # ------------------------------------------------------------------------------
-# Benchmark Targets (5 Rigorous Verified Targets from DAFL / FSE'24)
+# Benchmark Targets (Empirically Verified Targets: Anchor + 4 Medium-Hard Targets)
 # ------------------------------------------------------------------------------
 targets:
   - id: "cxxfilt"
-    name: "GNU Binutils cxxfilt (CVE-2016-4487 Demangle UAF)"
+    name: "GNU Binutils cxxfilt (CVE-2016-4487 Demangle Invalid Free)"
     path: "targets/cxxfilt"
     enabled: true
 
-  - id: "swftophp_20427"
-    name: "Ming swftophp (CVE-2018-20427 Flash Action Null Deref)"
-    path: "targets/swftophp_20427"
+  - id: "readelf_7209"
+    name: "GNU Binutils readelf (CVE-2017-7209 DWARF Reloc NULL Deref)"
+    path: "targets/readelf_7209"
     enabled: true
 
-  - id: "swftophp_12982"
-    name: "Ming swftophp (CVE-2019-12982 Decompile Heap BOF)"
-    path: "targets/swftophp_12982"
+  - id: "jasper_5221"
+    name: "JasPer jasper (CVE-2015-5221 MIF Double Free)"
+    path: "targets/jasper_5221"
     enabled: true
 
-  - id: "objdump_8397"
-    name: "GNU Binutils objdump (CVE-2017-8397 DWARF Reloc BOF)"
-    path: "targets/objdump_8397"
+  - id: "objdump_8392"
+    name: "GNU Binutils objdump (CVE-2017-8392 DWARF Heap Over-read)"
+    path: "targets/objdump_8392"
     enabled: true
 
-  - id: "nm_14940"
-    name: "GNU Binutils nm (CVE-2017-14940 ELF Version OOM/BOF)"
-    path: "targets/nm_14940"
+  - id: "cjpeg_14498"
+    name: "libjpeg-turbo cjpeg (CVE-2018-14498 BMP Heap Over-read)"
+    path: "targets/cjpeg_14498"
     enabled: true

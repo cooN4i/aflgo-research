@@ -1,0 +1,21 @@
+target:
+  id: "jasper_5221"
+  name: "JasPer jasper (CVE-2015-5221 Double Free)"
+  repo_url: "https://github.com/mdadams/jasper.git"
+  commit: "version-1.900.1"
+  vulnerability:
+    type: "Double Free / Use-After-Free"
+    reference: "CVE-2015-5221"
+    target_file: "mif_cod.c"
+    target_line: "mif_cod.c:587"
+
+build:
+  configure_cmd: "./configure --disable-shared --prefix=$PWD/install LDFLAGS=-lpthread"
+  make_cmd: "make -j$(nproc)"
+  binary_path: "src/appl/jasper"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "-f @@ -t mif -F /tmp/out.mif -T mif"
+  input_type: "file"
+  seed_dir: "seeds"

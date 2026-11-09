@@ -1,0 +1,21 @@
+target:
+  id: "cjpeg_14498"
+  name: "libjpeg-turbo cjpeg (CVE-2018-14498 Heap Over-read)"
+  repo_url: "https://github.com/libjpeg-turbo/libjpeg-turbo.git"
+  commit: "1.5.90"
+  vulnerability:
+    type: "Heap Out-Of-Bounds Read"
+    reference: "CVE-2018-14498 (GitHub Issue 258)"
+    target_file: "rdbmp.c"
+    target_line: "rdbmp.c:208"
+
+build:
+  configure_cmd: "cmake -G 'Unix Makefiles' -DENABLE_SHARED=0 -DWITH_SIMD=0"
+  make_cmd: "make -j$(nproc) cjpeg-static"
+  binary_path: "cjpeg-static"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "-outfile /dev/null @@"
+  input_type: "file"
+  seed_dir: "seeds"

@@ -1,0 +1,21 @@
+target:
+  id: "objdump_8392"
+  name: "GNU Binutils objdump (CVE-2017-8392 DWARF Heap BOF)"
+  repo_url: "https://sourceware.org/git/binutils-gdb.git"
+  commit: "binutils-2_28"
+  vulnerability:
+    type: "Heap Out-Of-Bounds Read / Buffer Overflow"
+    reference: "CVE-2017-8392 (Sourceware Bug 21409)"
+    target_file: "dwarf2.c"
+    target_line: "dwarf2.c:4212"
+
+build:
+  configure_cmd: "./configure --disable-werror --disable-shared --disable-gdb --disable-libdecnumber --disable-readline --disable-sim --disable-nls"
+  make_cmd: "make -j$(nproc) all-binutils"
+  binary_path: "binutils/objdump"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "-W @@"
+  input_type: "file"
+  seed_dir: "seeds"
