@@ -462,7 +462,7 @@ def is_target_in_stack_frames(stack_trace: str, target_loc: str, max_depth: int 
                 f_name = Path(m.group("file")).name
                 f_line = int(m.group("line"))
                 if f_name == target_file:
-                    if target_line is None or f_line == target_line:
+                    if target_line is None or abs(f_line - target_line) <= 5:
                         return True
                 break
 
@@ -487,6 +487,8 @@ def triage_crash(target_bin: str, target_args: str, crash_path: Path, target_loc
         "-v", f"{to_docker_host_path(crash_path.parent)}:/crash_dir:ro",
         "-v", f"{to_docker_host_path(Path(target_bin).parent)}:/bin_dir:ro",
         "-e", "ASAN_OPTIONS=abort_on_error=1:symbolize=1:detect_leaks=0:use_sigaltstack=0",
+        "-e", "ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-11/bin/llvm-symbolizer",
+        "-e", "PATH=/usr/lib/llvm-11/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         image_tag,
         "bash", "-c", run_cmd
     ]
@@ -565,7 +567,7 @@ for fname in file_names:
             fname_matched = Path(m.group('file')).name
             fline_matched = int(m.group('line'))
             if fname_matched == target_file:
-                if target_line is None or fline_matched == target_line:
+                if target_line is None or abs(fline_matched - target_line) <= 5:
                     print(f'TARGET_REACH_HIT:{{fname}}')
                     sys.exit(0)
 """

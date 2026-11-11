@@ -1,0 +1,22 @@
+target:
+  id: "tiff_10094"
+  name: "libtiff tiff2ps (CVE-2016-10094 Heap OOB Read)"
+  repo_url: "https://gitlab.com/libtiff/libtiff.git"
+  commit: "v4.0.7"
+  vulnerability:
+    type: "Heap Out-Of-Bounds Read"
+    reference: "CVE-2016-10094"
+    target_file: "tiff2ps.c"
+    target_line: "tiff2ps.c:2543"
+
+build:
+  configure_cmd: "./autogen.sh && ./configure --disable-shared --prefix=$PWD/install"
+  make_cmd: "make -C port -j$(nproc) && make -C libtiff -j$(nproc) && make -C tools tiff2ps -j$(nproc)"
+  binary_path: "tools/tiff2ps"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "-O /dev/null @@"
+  input_type: "file"
+  seed_dir: "seeds"
+

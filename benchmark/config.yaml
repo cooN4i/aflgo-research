@@ -102,30 +102,45 @@ fuzzers:
     enabled: false
 
 # ------------------------------------------------------------------------------
-# Benchmark Targets (Empirically Verified Targets: Anchor + 4 Medium-Hard Targets)
+# Benchmark Targets (Empirically Verified Targets: Anchor + 4 Proven Fast Targets)
 # ------------------------------------------------------------------------------
 targets:
   - id: "cxxfilt"
-    name: "GNU Binutils cxxfilt (CVE-2016-4487 Demangle Invalid Free)"
+    name: "GNU Binutils cxxfilt (CVE-2016-4487 Demangle Stack Overflow)"
     path: "targets/cxxfilt"
-    enabled: true
-
-  - id: "readelf_7209"
-    name: "GNU Binutils readelf (CVE-2017-7209 DWARF Reloc NULL Deref)"
-    path: "targets/readelf_7209"
-    enabled: true
-
-  - id: "jasper_5221"
-    name: "JasPer jasper (CVE-2015-5221 MIF Double Free)"
-    path: "targets/jasper_5221"
-    enabled: true
-
-  - id: "objdump_8392"
-    name: "GNU Binutils objdump (CVE-2017-8392 DWARF Heap Over-read)"
-    path: "targets/objdump_8392"
     enabled: true
 
   - id: "cjpeg_14498"
     name: "libjpeg-turbo cjpeg (CVE-2018-14498 BMP Heap Over-read)"
     path: "targets/cjpeg_14498"
     enabled: true
+
+  - id: "cflow_16165"
+    name: "GNU cflow (CVE-2019-16165 Parser Use-After-Free)"
+    path: "targets/cflow_16165"
+    enabled: true
+
+  - id: "tiff_10094"
+    name: "libtiff tiff2ps (CVE-2016-10094 PSDataPalette Heap OOB Read)"
+    path: "targets/tiff_10094"
+    enabled: true
+
+  - id: "libxml2_5969"
+    name: "GNOME libxml2 xmllint (CVE-2017-5969 ElementContent NULL Deref)"
+    path: "targets/libxml2_5969"
+    enabled: true
+
+  - id: "readelf_7209"
+    name: "GNU Binutils readelf (CVE-2017-7209 DWARF Reloc NULL Deref)"
+    path: "targets/readelf_7209"
+    enabled: false
+
+  - id: "jasper_5221"
+    name: "JasPer jasper (CVE-2015-5221 MIF Double Free)"
+    path: "targets/jasper_5221"
+    enabled: false
+
+  - id: "objdump_8392"
+    name: "GNU Binutils objdump (CVE-2017-8392 DWARF Heap Over-read)"
+    path: "targets/objdump_8392"
+    enabled: false

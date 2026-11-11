@@ -1,0 +1,22 @@
+target:
+  id: "cflow_16165"
+  name: "GNU cflow (CVE-2019-16165 UAF/NULL Deref)"
+  repo_url: "https://git.savannah.gnu.org/git/cflow.git"
+  commit: "release-1.6"
+  vulnerability:
+    type: "Use-After-Free / NULL Dereference"
+    reference: "CVE-2019-16165"
+    target_file: "parser.c"
+    target_line: "parser.c:1229"
+
+build:
+  configure_cmd: "./configure --disable-shared --prefix=$PWD/install"
+  make_cmd: "make -j$(nproc)"
+  binary_path: "src/cflow"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "@@"
+  input_type: "file"
+  seed_dir: "seeds"
+
