@@ -279,10 +279,15 @@ def clone_target_source(target: Dict[str, Any], cache_dir: Path):
     commit = target['commit']
 
     subprocess.run(["git", "init"], cwd=target_cache, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "config", "core.autocrlf", "false"], cwd=target_cache, check=True)
     subprocess.run(["git", "remote", "add", "origin", repo_url], cwd=target_cache, check=True, stdout=subprocess.DEVNULL)
     print(f"    Fetching commit {commit}...")
     subprocess.run(["git", "fetch", "--depth", "1", "origin", commit], cwd=target_cache, check=True)
-    subprocess.run(["git", "checkout", "FETCH_HEAD"], cwd=target_cache, check=True)
+    try:
+        subprocess.run(["git", "checkout", "FETCH_HEAD"], cwd=target_cache, check=True)
+    except subprocess.CalledProcessError:
+        # Fallback for Windows path compatibility (e.g. libming files containing ':')
+        subprocess.run(["git", "checkout", "-f", "FETCH_HEAD", "--", ":!docs/perl*", ":!docs/perlman*"], cwd=target_cache, check=True)
     print(f"[+] Cloned {target_id} successfully.")
     return target_cache
 
@@ -357,11 +362,12 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
         tr -d '\\r' < /recipe/build.sh > /tmp/recipe/build.sh
         chmod +x /tmp/recipe/build.sh
         if [ -d /src_cache/.git ]; then
-            tar --exclude=.git -cf - -C /src_cache . | tar -xf - -C /src/{target_id}/
+            tar --exclude=.git --exclude='./gdb' --exclude='./sim' --exclude='ld/testsuite' --exclude='gas/testsuite' --exclude='binutils/testsuite' --exclude='gold/testsuite' -cf - -C /src_cache . | tar -xf - -C /src/{target_id}/
         else
             cp -a /src_cache/. /src/{target_id}/
         fi
         cd /src/{target_id}
+        find . -type f \\( -name "configure*" -o -name "*.sh" -o -name "*.ac" -o -name "*.in" -o -name "config.*" -o -name "mkinstalldirs" -o -name "install-sh" -o -name "depcomp" -o -name "compile" -o -name "move-if-change" -o -name "*.sed" \\) | xargs sed -i 's/\\r$//' 2>/dev/null || true
         ASAN_OPTIONS="abort_on_error=1:detect_leaks=0:use_sigaltstack=0" SRC_DIR="/src/{target_id}" WORK_DIR="/work" OUT_DIR="/out" /tmp/recipe/build.sh all
         """
     ]

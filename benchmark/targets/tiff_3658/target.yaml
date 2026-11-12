@@ -1,0 +1,22 @@
+target:
+  id: "tiff_3658"
+  name: "libtiff tiffcp (CVE-2016-3658 LongLong8Array OOB Read)"
+  repo_url: "https://gitlab.com/libtiff/libtiff.git"
+  commit: "5612707c086cda76319552a0a2afeddcfa67d1b3"
+  vulnerability:
+    type: "Out-Of-Bounds Read"
+    reference: "CVE-2016-3658"
+    target_file: "tif_dirwrite.c"
+    target_line: "tif_dirwrite.c:1625"
+
+build:
+  configure_cmd: "./autogen.sh && ./configure --disable-shared --prefix=$PWD/install"
+  make_cmd: "make -C port -j$(nproc) && make -C libtiff -j$(nproc) && make -C tools tiffcp -j$(nproc)"
+  binary_path: "tools/tiffcp"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "-i @@ /tmp/out.tif"
+  input_type: "file"
+  seed_dir: "seeds"
+

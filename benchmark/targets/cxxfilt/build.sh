@@ -30,6 +30,9 @@ mkdir -p "$OUT_DIR" "$WORK_DIR"
 
 cd "$SRC_DIR"
 
+# Clean CRLF in case source was checked out on Windows
+find . -type f \( -name "configure*" -o -name "*.sh" -o -name "*.in" -o -name "*.ac" -o -name "config.*" -o -name "mkinstalldirs" -o -name "install-sh" -o -name "depcomp" -o -name "compile" -o -name "move-if-change" -o -name "*.sed" \) | xargs sed -i 's/\r$//' 2>/dev/null || true
+
 # Set canonical target lines for CVE-2016-4487
 cat << 'EOF' > "$WORK_DIR/BBtargets.txt"
 cplus-dem.c:4319
@@ -99,6 +102,9 @@ if [ "$MODE" = "pass2" ] || [ "$MODE" = "all" ]; then
     echo "[*] Starting Pass 2: Binary Instrumentation..."
     
     cd "$SRC_DIR"
+
+# Clean CRLF in case source was checked out on Windows
+find . -type f \( -name "configure*" -o -name "*.sh" -o -name "*.in" -o -name "*.ac" -o -name "config.*" -o -name "mkinstalldirs" -o -name "install-sh" -o -name "depcomp" -o -name "compile" -o -name "move-if-change" -o -name "*.sed" \) | xargs sed -i 's/\r$//' 2>/dev/null || true
     make clean || true
     make distclean || true
     find . -name "config.cache" -delete 2>/dev/null || true

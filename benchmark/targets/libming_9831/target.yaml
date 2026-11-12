@@ -1,0 +1,22 @@
+target:
+  id: "libming_9831"
+  name: "Ming listswf (CVE-2016-9831 Heap BOF)"
+  repo_url: "https://github.com/libming/libming.git"
+  commit: "6f91d1aa8f2351c2226020df015d3f05e453f3ee"
+  vulnerability:
+    type: "Heap Buffer Overflow"
+    reference: "CVE-2016-9831"
+    target_file: "parser.c"
+    target_line: "parser.c:66"
+
+build:
+  configure_cmd: "./autogen.sh && ./configure --disable-werror --disable-shared --disable-freetype"
+  make_cmd: "make -C src/actioncompiler -j1 && make -j$(nproc)"
+  binary_path: "util/listswf"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "@@"
+  input_type: "file"
+  seed_dir: "seeds"
+

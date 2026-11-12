@@ -102,7 +102,7 @@ fuzzers:
     enabled: false
 
 # ------------------------------------------------------------------------------
-# Benchmark Targets (Empirically Verified Targets: Anchor + 4 Proven Fast Targets)
+# Benchmark Targets (5 Calibrated Targets: 2 Anchors + 3 Deep DGF Navigation Targets)
 # ------------------------------------------------------------------------------
 targets:
   - id: "cxxfilt"
@@ -120,15 +120,25 @@ targets:
     path: "targets/cflow_16165"
     enabled: true
 
+  - id: "tiff_3658"
+    name: "libtiff tiffcp (CVE-2016-3658 LongLong8Array OOB Read)"
+    path: "targets/tiff_3658"
+    enabled: true
+
+  - id: "libming_9831"
+    name: "Ming listswf (CVE-2016-9831 parseSWF_RGBA Heap BOF)"
+    path: "targets/libming_9831"
+    enabled: true
+
   - id: "tiff_10094"
     name: "libtiff tiff2ps (CVE-2016-10094 PSDataPalette Heap OOB Read)"
     path: "targets/tiff_10094"
-    enabled: true
+    enabled: false
 
   - id: "libxml2_5969"
     name: "GNOME libxml2 xmllint (CVE-2017-5969 ElementContent NULL Deref)"
     path: "targets/libxml2_5969"
-    enabled: true
+    enabled: false
 
   - id: "readelf_7209"
     name: "GNU Binutils readelf (CVE-2017-7209 DWARF Reloc NULL Deref)"

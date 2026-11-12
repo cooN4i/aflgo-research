@@ -7,7 +7,7 @@ target:
     type: "Use-After-Free / NULL Dereference"
     reference: "CVE-2019-16165"
     target_file: "parser.c"
-    target_line: "parser.c:1229"
+    target_line: "parser.c:1298"
 
 build:
   configure_cmd: "./configure --disable-shared --prefix=$PWD/install"

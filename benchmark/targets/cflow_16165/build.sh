@@ -41,9 +41,9 @@ fi
 
 # Set canonical target lines for CVE-2019-16165
 cat << 'EOF' > "$WORK_DIR/BBtargets.txt"
-parser.c:1229
-parser.c:1230
-parser.c:1225
+parser.c:1298
+parser.c:1299
+parser.c:1297
 EOF
 
 if [ "$MODE" = "pass1" ] || [ "$MODE" = "all" ]; then
