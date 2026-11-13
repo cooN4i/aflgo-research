@@ -22,27 +22,20 @@ if [ -z "${AFL_PATH:-}" ]; then
     if [ -d "/fuzzer/aflgo-orig/instrument" ]; then export AFL_PATH="/fuzzer/aflgo-orig/instrument"; fi
 fi
 
+if [ -z "${AFLGO:-}" ]; then
+    if [ -d "/fuzzer/aflgo-mod" ]; then export AFLGO="/fuzzer/aflgo-mod"; fi
+    if [ -d "/fuzzer/aflgo-orig" ]; then export AFLGO="/fuzzer/aflgo-orig"; fi
+fi
+
 export CC="afl-clang-fast"
 export CXX="afl-clang-fast++"
 
 mkdir -p "$OUT_DIR" "$WORK_DIR"
 cd "$SRC_DIR"
 
-# Set canonical target lines for CVE-2017-8397
+# Set canonical target line for CVE-2017-8397
 cat << 'EOF' > "$WORK_DIR/BBtargets.txt"
 reloc.c:885
-reloc.c:8099
-bfd.c:1559
-simple.c:264
-objdump.c:2414
-objdump.c:2552
-section.c:1395
-objdump.c:2621
-objdump.c:3459
-objdump.c:3526
-objdump.c:3615
-objdump.c:3636
-objdump.c:3919
 EOF
 
 if [ "$MODE" = "pass1" ] || [ "$MODE" = "all" ]; then

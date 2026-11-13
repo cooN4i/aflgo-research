@@ -292,7 +292,7 @@ def clone_target_source(target: Dict[str, Any], cache_dir: Path):
     return target_cache
 
 
-def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: Dict[str, Any]):
+def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: Dict[str, Any], force: bool = False):
     target_id = target['id']
     fuzzer_id = fuzzer['id']
     print(f"\n=======================================================")
@@ -311,16 +311,6 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
     out_dir = (BINARIES_DIR / fuzzer_id / target_id).resolve()
     safe_mkdir(out_dir)
 
-    # Check if target binary already exists to avoid redundant recompilation
-    candidates = [c for c in out_dir.glob(f"{target_id}*") if c.is_file() and c.stat().st_size > 0]
-    if candidates:
-        print(f"[+] Binary for target '{target_id}' with fuzzer '{fuzzer_id}' already exists -> {candidates[0]} (skipping build).")
-        return True
-
-    # Clone source to cache if not present
-    safe_mkdir(CACHE_DIR)
-    source_cache = clone_target_source(target_info, CACHE_DIR)
-
     # Copy seeds and dictionary into out_dir for trial use
     seeds_src = recipe_dir / "seeds"
     if seeds_src.exists():
@@ -328,6 +318,16 @@ def build_target_binary(target: Dict[str, Any], fuzzer: Dict[str, Any], config: 
         if seeds_dst.exists():
             shutil.rmtree(seeds_dst)
         shutil.copytree(seeds_src, seeds_dst)
+
+    # Check if target binary already exists to avoid redundant recompilation
+    candidates = [c for c in out_dir.glob(f"{target_id}*") if c.is_file() and c.stat().st_size > 0]
+    if candidates and not force:
+        print(f"[+] Binary for target '{target_id}' with fuzzer '{fuzzer_id}' already exists -> {candidates[0]} (skipping build).")
+        return True
+
+    # Clone source to cache if not present
+    safe_mkdir(CACHE_DIR)
+    source_cache = clone_target_source(target_info, CACHE_DIR)
 
     # Run compilation inside fuzzer container
     image_tag = f"dgf-fuzzer-{fuzzer_id}"
@@ -415,9 +415,10 @@ def cmd_build(args, config: Dict[str, Any]):
 
     active_fuzzers = [f for f in config['fuzzers'] if (args.fuzzer is None or f['id'] == args.fuzzer) and f.get('enabled', True)]
 
+    force_build = getattr(args, 'force', False)
     for t in targets_to_build:
         for f in active_fuzzers:
-            success = build_target_binary(t, f, config)
+            success = build_target_binary(t, f, config, force=force_build)
             if not success:
                 print(f"\n[FATAL] Compilation failed for target '{t['id']}' with fuzzer '{f['id']}'. Stopping build immediately!")
                 sys.exit(1)
@@ -1027,6 +1028,7 @@ def main():
     build_parser.add_argument("--branch", type=str, default="develop", help="Git branch to clone for aflgo_mod and aflgo_orig (default: develop)")
     build_parser.add_argument("--target", type=str, help="Specific target to compile")
     build_parser.add_argument("--all", action="store_true", help="Build all images and targets")
+    build_parser.add_argument("-f", "--force", action="store_true", help="Force recompilation even if binary already exists")
 
     # Command: run
     run_parser = subparsers.add_parser("run", help="Execute fuzzing experiments with pinned CPUs")

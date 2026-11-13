@@ -102,33 +102,48 @@ fuzzers:
     enabled: false
 
 # ------------------------------------------------------------------------------
-# Benchmark Targets (5 Calibrated Targets: 2 Anchors + 3 Deep DGF Navigation Targets)
+# Benchmark Targets (5 Calibrated Diverse Targets: TTT > 30 min, TTT <= 12h)
 # ------------------------------------------------------------------------------
 targets:
-  - id: "cxxfilt"
-    name: "GNU Binutils cxxfilt (CVE-2016-4487 Demangle Stack Overflow)"
-    path: "targets/cxxfilt"
+  - id: "objdump_8397"
+    name: "GNU Binutils objdump (CVE-2017-8397 Heap BOF)"
+    path: "targets/objdump_8397"
+    enabled: true
+
+  - id: "swftophp_11225"
+    name: "Ming swftophp (CVE-2018-11225 ActionScript Switch BOF)"
+    path: "targets/swftophp_11225"
     enabled: true
 
   - id: "cjpeg_14498"
-    name: "libjpeg-turbo cjpeg (CVE-2018-14498 BMP Heap Over-read)"
+    name: "libjpeg-turbo cjpeg (CVE-2018-14498 BMP Colormap Heap Over-read)"
     path: "targets/cjpeg_14498"
     enabled: true
+
+  - id: "libxml2_9047"
+    name: "GNOME libxml2 xmllint (CVE-2017-9047 DTD Element Stack Overflow)"
+    path: "targets/libxml2_9047"
+    enabled: true
+
+  - id: "tiff_3658"
+    name: "libtiff tiffcp (CVE-2016-3658 Long8Array OOB Read)"
+    path: "targets/tiff_3658"
+    enabled: true
+
+  - id: "cxxfilt"
+    name: "GNU Binutils cxxfilt (CVE-2016-4487 Demangle Stack Overflow)"
+    path: "targets/cxxfilt"
+    enabled: false
 
   - id: "cflow_16165"
     name: "GNU cflow (CVE-2019-16165 Parser Use-After-Free)"
     path: "targets/cflow_16165"
-    enabled: true
-
-  - id: "tiff_3658"
-    name: "libtiff tiffcp (CVE-2016-3658 LongLong8Array OOB Read)"
-    path: "targets/tiff_3658"
-    enabled: true
+    enabled: false
 
   - id: "libming_9831"
     name: "Ming listswf (CVE-2016-9831 parseSWF_RGBA Heap BOF)"
     path: "targets/libming_9831"
-    enabled: true
+    enabled: false
 
   - id: "tiff_10094"
     name: "libtiff tiff2ps (CVE-2016-10094 PSDataPalette Heap OOB Read)"

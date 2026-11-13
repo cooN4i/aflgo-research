@@ -27,6 +27,11 @@ if [ -z "${AFL_PATH:-}" ]; then
     if [ -d "/fuzzer/aflgo-orig/instrument" ]; then export AFL_PATH="/fuzzer/aflgo-orig/instrument"; fi
 fi
 
+if [ -z "${AFLGO:-}" ]; then
+    if [ -d "/fuzzer/aflgo-mod" ]; then export AFLGO="/fuzzer/aflgo-mod"; fi
+    if [ -d "/fuzzer/aflgo-orig" ]; then export AFLGO="/fuzzer/aflgo-orig"; fi
+fi
+
 export CC="afl-clang-fast"
 export CXX="afl-clang-fast++"
 

@@ -1,0 +1,21 @@
+target:
+  id: "swftophp_11225"
+  name: "Ming swftophp (CVE-2018-11225 Heap BOF)"
+  repo_url: "https://github.com/libming/libming.git"
+  commit: "b72cc2fda0e8b3792b7b3f7361fc3f917f269433"
+  vulnerability:
+    type: "Heap Buffer Overflow"
+    reference: "CVE-2018-11225"
+    target_file: "decompile.c"
+    target_line: "decompile.c:2015"
+
+build:
+  configure_cmd: "./autogen.sh && ./configure --disable-werror --disable-shared --disable-freetype"
+  make_cmd: "make -j$(nproc)"
+  binary_path: "util/swftophp"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "@@"
+  input_type: "file"
+  seed_dir: "seeds"

@@ -1,0 +1,21 @@
+target:
+  id: "libxml2_9047"
+  name: "GNOME libxml2 xmllint (CVE-2017-9047 Stack Overflow)"
+  repo_url: "https://gitlab.gnome.org/GNOME/libxml2.git"
+  commit: "v2.9.4"
+  vulnerability:
+    type: "Stack Buffer Overflow"
+    reference: "CVE-2017-9047"
+    target_file: "valid.c"
+    target_line: "valid.c:1279"
+
+build:
+  configure_cmd: "./autogen.sh && ./configure --disable-shared --without-python --prefix=$PWD/install"
+  make_cmd: "make -j$(nproc)"
+  binary_path: "xmllint"
+  sanitizer_flags: "-fsanitize=address"
+
+fuzzing:
+  target_args: "--valid @@"
+  input_type: "file"
+  seed_dir: "seeds"
